@@ -1,0 +1,6 @@
+mesa-source/
+builddir/
+out/
+*.tzst
+*.tzst.sha256
+.scratch/
