@@ -1,0 +1,24 @@
+{
+  "stock": {
+    "note": "com.faux.vktest 1.32, loaded_via system, Mali-G77 MC9 v1.r32p1-01eac0, X6739, 2026-11-17",
+    "verdicts": {"pass": 54, "fail": 2, "unsupported": 39, "warn": 0},
+    "crashes": [],
+    "total_verdicts": 95,
+    "perf_ms": {
+      "perf.occlusion_query_in_pass_cost": 1.06,
+      "perf.fb_local_barrier_overdraw": 1.66,
+      "perf.fb_local_barrier_large_draws": 13.35
+    }
+  },
+  "previous_build": {
+    "note": "PanVK-rynx p13 (0011+0012), 2026-11-18, before 0014/0015",
+    "verdicts": {"pass": 71, "fail": 13, "unsupported": 12, "warn": 1},
+    "crashes": ["stage.geometry_point_to_quad", "xfb.capture", "xfb.geometry_shader_capture"],
+    "total_verdicts": 97,
+    "perf_ms": {
+      "perf.occlusion_query_in_pass_cost": 20.43,
+      "perf.fb_local_barrier_overdraw": 1.44,
+      "perf.fb_local_barrier_large_draws": null
+    }
+  }
+}

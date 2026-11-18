@@ -72,6 +72,27 @@ summary['perf_ms'] = {
     'perf.fb_local_barrier_overdraw': timing('perf.fb_local_barrier_overdraw'),
     'perf.fb_local_barrier_large_draws': timing('perf.fb_local_barrier_large_draws'),
 }
+baseline_path = 'tests/baseline.json'
+comparison = {}
+if os.path.exists(baseline_path):
+    base = json.load(open(baseline_path))
+    for name, b in base.items():
+        dv = {}
+        for k in ('pass', 'fail', 'warn'):
+            now = summary['verdicts'].get(k, 0)
+            then = b.get('verdicts', {}).get(k, 0)
+            dv[k] = {'now': now, 'baseline': then, 'delta': now - then}
+        perf = {}
+        for k, then in b.get('perf_ms', {}).items():
+            now = summary['perf_ms'].get(k)
+            perf[k] = {'now_ms': now, 'baseline_ms': then,
+                       'speedup_x': round(then / now, 2) if (now and then) else None}
+        comparison[name] = {
+            'verdicts': dv,
+            'crashes': {'now': len(summary['crashes']), 'baseline': len(b.get('crashes', []))},
+            'perf': perf,
+        }
+summary['comparison'] = comparison
 json.dump(summary, open(os.path.join(out, 'summary.json'), 'w'), indent=2)
 print(json.dumps(summary, indent=2))
 PY
