@@ -1,0 +1,18 @@
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c
+index e2d79e3..72d5764 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c
+@@ -54,7 +54,12 @@ panvk_emit_write_job(struct panvk_cmd_buffer *cmd, struct panvk_batch *batch,
+       payload.immediate_value = value;
+    };
+ 
+-   pan_jc_add_job(&batch->vtc_jc, MALI_JOB_TYPE_WRITE_VALUE, true, false, 0, 0,
++   /* A barrier here serialises the whole VTC chain. The query report clear
++    * only needs to be ordered before the jobs that consume it, which the
++    * job-chain dependency already provides (the other JM WRITE_VALUE user,
++    * the indirect index min/max clear, uses barrier=false too). Precise
++    * occlusion queries otherwise cost ~19x the stock driver. */
++   pan_jc_add_job(&batch->vtc_jc, MALI_JOB_TYPE_WRITE_VALUE, false, false, 0, 0,
+                   &job, false);
+    util_dynarray_append(&batch->jobs, job.cpu);
+ }
