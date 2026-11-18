@@ -15,7 +15,7 @@ maintained separately in [DroidDeck](https://github.com/ryanistr/DroidDeck-Mali)
 Stock Mesa PanVK enables arches 6, 7 and 10 only. A G77 is Valhall arch 9 with a Job Manager,
 so upstream produces no physical device for it. The source tree used here
 (`apexspan-svg/mesa-panvk-mali-g57`, Mesa 26.3.0-devel) carries the v9 JM backend and its own
-kbase code. On top of it this repository applies eighteen patches that make the driver work on
+kbase code. On top of it this repository applies seventeen patches that make the driver work on
 MT6893: dma-heap nodes that are `0444`, a missing G77 model row, real swapchain BO dumps,
 the DRM device numbers gamescope matches on, and CSF fixes for the newer Mali generations
 compiled into the same binary. See [docs/PATCHES.md](docs/PATCHES.md).
