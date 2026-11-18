@@ -1,13 +1,13 @@
 Subject: 0022
 
 ---
- src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c | 20 +++++++++-----------
- src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c   |  4 ++++
- src/panfrost/vulkan/panvk_cmd_draw.h         |  3 ++-
- 3 files changed, 15 insertions(+), 12 deletions(-)
+ src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c | 11 -----------
+ src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c   |  2 ++
+ src/panfrost/vulkan/panvk_cmd_draw.h         |  2 +-
+ 3 files changed, 3 insertions(+), 12 deletions(-)
 
 diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
-index 371b47d..c958cd2 100644
+index 371b47d..f26af65 100644
 --- a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
 +++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
 @@ -191,15 +191,10 @@ panvk_per_arch(cmd_close_batch)(struct panvk_cmd_buffer *cmdbuf)
@@ -48,43 +48,11 @@ index 371b47d..c958cd2 100644
      }
  
     cmdbuf->cur_batch = NULL;
-@@ -485,6 +474,15 @@ panvk_per_arch(CmdPipelineBarrier2)(VkCommandBuffer commandBuffer,
-     * barrier flag set to true.
-     */
-    if (cmdbuf->cur_batch) {
-+#if PAN_ARCH >= 9
-+      /* A by-region barrier inside a render pass only orders tilebuffer work;
-+       * keeping the batch open avoids 64x tiler spill/reload round trips. */
-+      if (cmdbuf->state.gfx.render.layer_count > 0 &&
-+          (pDependencyInfo->dependencyFlags & VK_DEPENDENCY_BY_REGION_BIT)) {
-+         cmdbuf->state.gfx.render.fb.fb_barrier = true;
-+         return;
-+      }
-+#endif
-       panvk_per_arch(cmd_close_batch)(cmdbuf);
-       panvk_per_arch(cmd_open_batch)(cmdbuf);
-    }
 diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
-index 80209e9..4821e6b 100644
+index 80209e9..37f0467 100644
 --- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
 +++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
-@@ -2222,6 +2222,7 @@ panvk_v9_build_dcd_flags(struct panvk_cmd_buffer *cmdbuf,
-       cfg.multisample_enable = msaa;
-       cfg.occlusion_query = cmdbuf->state.gfx.occlusion_query.mode;
-       cfg.alpha_to_coverage = alpha_to_coverage;
-+      cfg.primitive_barrier = cmdbuf->state.gfx.render.fb.fb_barrier;
-       cfg.scissor_to_bounding_box = true;
-    }
- 
-@@ -2357,6 +2358,7 @@ panvk_v9_draw(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_info *info)
-       return result;
- 
-    panvk_v9_build_dcd_flags(cmdbuf, fs, &dcd_flags);
-+   cmdbuf->state.gfx.render.fb.fb_barrier = false;
- 
-    /* TLS desc is shared by the whole batch. */
-    result = panvk_per_arch(cmd_alloc_tls_desc)(cmdbuf, true);
-@@ -2709,6 +2711,7 @@ panvk_per_arch(CmdBeginRendering)(VkCommandBuffer commandBuffer,
+@@ -2709,6 +2709,7 @@ panvk_per_arch(CmdBeginRendering)(VkCommandBuffer commandBuffer,
           panvk_per_arch(cmd_close_batch)(cmdbuf);
  
        panvk_per_arch(cmd_init_render_state)(cmdbuf, pRenderingInfo);
@@ -92,7 +60,7 @@ index 80209e9..4821e6b 100644
     }
  
     if (!cmdbuf->cur_batch)
-@@ -2722,6 +2725,7 @@ panvk_per_arch(CmdEndRendering)(VkCommandBuffer commandBuffer)
+@@ -2722,6 +2723,7 @@ panvk_per_arch(CmdEndRendering)(VkCommandBuffer commandBuffer)
  
     if (!(cmdbuf->state.gfx.render.flags & VK_RENDERING_SUSPENDING_BIT)) {
        panvk_per_arch(cmd_alloc_fb_desc)(cmdbuf);
@@ -101,10 +69,10 @@ index 80209e9..4821e6b 100644
        cmdbuf->cur_batch = NULL;
        panvk_per_arch(cmd_meta_resolve_attachments)(cmdbuf);
 diff --git a/src/panfrost/vulkan/panvk_cmd_draw.h b/src/panfrost/vulkan/panvk_cmd_draw.h
-index 91ed427..47f3755 100644
+index 91ed427..21e6cce 100644
 --- a/src/panfrost/vulkan/panvk_cmd_draw.h
 +++ b/src/panfrost/vulkan/panvk_cmd_draw.h
-@@ -97,9 +97,10 @@ struct panvk_rendering_state {
+@@ -97,9 +97,9 @@ struct panvk_rendering_state {
  #if PAN_ARCH < 9
        uint32_t bo_count;
        struct pan_kmod_bo *bos[(MAX_RTS * PANVK_MAX_PLANES) + 2];
@@ -112,7 +80,6 @@ index 91ed427..47f3755 100644
        bool needs_load;
        bool needs_store;
 -#endif
-+      bool fb_barrier;
     } fb;
  
  #if PAN_ARCH >= 10
