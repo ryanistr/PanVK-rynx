@@ -126,3 +126,41 @@ UUID. Full 100-check run (`/home/ryanistr/.hermes/cache/scratch/panvk/panvk_rx_c
 
 Conclusion: both targets compile in CI; the CI bionic driver is functionally identical to the
 locally verified build and shows the same stock-comparison profile recorded above.
+
+## Attempted occlusion-query fix (0013) — tested and reverted
+
+Patch `0013-occlusion-query-write-barrier.patch` changed the query-report-clear WRITE_VALUE
+job from `barrier=true` to `barrier=false`, on the hypothesis that 128 barrier jobs were
+serialising the VTC chain. CI built both targets successfully with it
+(glibc [44236381706](https://github.com/ryanistr/PanVK-rynx/actions/runs/44236381706),
+bionic [44236381688](https://github.com/ryanistr/PanVK-rynx/actions/runs/44236381688)).
+
+On-device result: **no benefit and no regression.** `perf.occlusion_query_in_pass_cost`
+was 22.15 ms with the patch (vs 20.43 ms before, within run-to-run variance), and the full
+100-check verdict set was byte-for-byte identical (71 pass / 13 fail / 12 unsupported /
+1 warn + same 3 crashes). The patch was therefore reverted (`94ccd0a`).
+
+### Root causes of the remaining gaps (source inspection)
+
+- **XFB crash (`xfb.capture`, `xfb.geometry_shader_capture`):** `xfb.base` / `xfb.offset_ptr`
+  sysvals and the XFB buffer bindings are only implemented in the CSF path
+  (`src/panfrost/vulkan/csf/panvk_vX_cmd_draw.c`, `csf/panvk_vX_cmd_xfb.c`); the v9 JM path
+  has neither. `EXT_transform_feedback`, `geometryShader` and `tessellationShader` are
+  nevertheless advertised unconditionally with `/* ADHOC-DXVK-FL */` markers
+  (`panvk_vX_physical_device.c:238,325,607`) because DXVK requires them at device creation.
+  Shaders then use uninitialised XFB/geometry sysvals and crash. Disabling the advertisement
+  would remove the crashes but break the driver's primary DXVK use case, so it was not done.
+- **Geometry segfault (`stage.geometry_point_to_quad`):** `bifrost_compile.c` reports
+  `Unhandled intrinsic emit_vertex/end_primitive` for the test's geometry shader, confirming
+  the JM compiler path does not implement geometry-shader output.
+- **Occlusion-query cost:** the `writes_zs_or_oq` input to `pan_earlyzs_get` is upstream Mesa
+  logic shared by the CSF path, not a fork-specific regression; the ~19x gap to the vendor
+  driver is inherent to this PanVK backend's early-Z handling, not the report-clear barrier.
+- **firstInstance / MRT write-mask / framebuffer barriers:** the indirect helper does patch
+  `instance.base` into attribute offsets and the base-instance FAU
+  (`src/panfrost/libpan/draw_helper.cl`), and write-mask-0 attachments are excluded from
+  `rt_written`, so the failures are deeper descriptor/tiler behaviour in the v9 JM path.
+
+These gaps require implementing missing JM functionality (XFB/geometry/tessellation and
+backend-specific barrier/query handling), not small configuration patches. They are left
+as documented known limitations rather than papering over them by hiding features.
