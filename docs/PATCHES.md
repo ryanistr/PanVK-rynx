@@ -18,6 +18,7 @@ Patch bodies are kept byte-for-byte so they continue to apply to that tag.
 | `0011-jm-merged-submit-by-default.patch` | The kbase JM queue submitted and waited for every batch in turn, leaving the GPU idle between batches; the merged one-bag-per-submit path existed but was env-gated. Makes it the default; `PANVK_MERGE_SUBMIT=0` restores the old path. |
 | `0012-v9-compute-scratch-floor.patch` | A v9 compute shader that spills gets 4 KiB of scratch per thread, the minimum this generation needs; under-allocating lets the job run until the kernel stops it on timeout. |
 | `0014-compat-nested-map.patch` | A second `vkMapMemory` on an already-mapped allocation returns the existing pointer (as the stock driver does) instead of `VK_ERROR_MEMORY_MAP_FAILED`; vktest `compat.nested_map`. |
+| `0015-occlusion-query-batch-close.patch` | `vkCmdEndQuery` closed the batch on every query, turning an N-query pass into N submits plus N cache flushes. Keep the batch open; the available-flag WRITE_VALUE barrier still orders the result. |
 
 0001-0003 and 0009-0010 are specific to the G77 bring-up path. 0004-0008 are CSF fixes for
 the other Mali generations compiled into the same binary; they do not change arch-9 JM

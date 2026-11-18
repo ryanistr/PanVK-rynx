@@ -1,0 +1,27 @@
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c
+index e2d79e3..1d6cf1f 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c
+@@ -182,15 +182,15 @@ panvk_per_arch(CmdEndQueryIndexedEXT)(VkCommandBuffer commandBuffer,
+    /* TODO: transform feedback */
+    assert(index == 0);
+ 
+-   bool end_sync = cmd->cur_batch != NULL;
+-
+-   /* Close to ensure we are sync and flush caches */
+-   if (end_sync)
+-      panvk_per_arch(cmd_close_batch)(cmd);
+-
+    bool had_batch;
+    struct panvk_batch *batch = open_batch(cmd, &had_batch);
+-   had_batch |= end_sync;
++
++   /* Keep the batch open: closing it for every vkCmdEndQuery turns a pass
++    * with N occlusion queries into N submits/batches (and N cache flushes),
++    * which dominates the cost of precise occlusion queries. The available
++    * flag below is written by a barrier WRITE_VALUE job, which orders it
++    * against the later query-result copy. */
++
+ 
+    switch (pool->vk.query_type) {
+    case VK_QUERY_TYPE_OCCLUSION: {
