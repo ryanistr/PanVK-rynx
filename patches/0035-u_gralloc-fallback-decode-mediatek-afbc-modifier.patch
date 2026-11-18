@@ -1,0 +1,47 @@
+--- a/src/util/u_gralloc/u_gralloc_fallback.c
++++ b/src/util/u_gralloc/u_gralloc_fallback.c
+@@ -160,6 +160,44 @@
+    out->fds[0] = fallback_find_dmabuf_fd(hnd->handle);
+    out->strides[0] = stride;
+ 
++   /* MediaTek gralloc private_handle_t carries magic 0x03141592 and alloc_format
++    * at ints[30..31], which may use AFBC on GPU_FB | GPU_SAMPLED buffers. */
++   if (hnd->handle->numInts >= 32 &&
++       (uint32_t)hnd->handle->data[hnd->handle->numFds + 18] == 0x03141592u) {
++      const int *ints = &hnd->handle->data[hnd->handle->numFds];
++      uint64_t af = ((uint64_t)(uint32_t)ints[31] << 32) | (uint32_t)ints[30];
++      if (af & (1ULL << 32)) {
++         uint64_t mod = 0;
++         if (af & (1ULL << 36)) {
++            mod |= (hnd->handle->numInts >= 43 && ints[42] == 0)
++                      ? AFBC_FORMAT_MOD_BLOCK_SIZE_32x8
++                      : AFBC_FORMAT_MOD_BLOCK_SIZE_32x8_64x4;
++         } else {
++            mod |= (af & (1ULL << 38)) ? AFBC_FORMAT_MOD_BLOCK_SIZE_64x4
++                                       : AFBC_FORMAT_MOD_BLOCK_SIZE_16x16;
++         }
++         if (af & (1ULL << 35))
++            mod |= AFBC_FORMAT_MOD_SPLIT;
++         if (af & (1ULL << 37))
++            mod |= AFBC_FORMAT_MOD_TILED;
++         if (af & (1ULL << 39))
++            mod |= AFBC_FORMAT_MOD_CBR;
++         if (af & (1ULL << 40))
++            mod |= AFBC_FORMAT_MOD_BCH;
++         if (af & (1ULL << 41))
++            mod |= AFBC_FORMAT_MOD_YTR;
++         if (af & (1ULL << 42))
++            mod |= AFBC_FORMAT_MOD_SPARSE;
++         if (af & (1ULL << 43))
++            mod |= AFBC_FORMAT_MOD_USM;
++         out->modifier = DRM_FORMAT_MOD_ARM_AFBC(mod);
++      } else if (af & (1ULL << 34)) {
++         out->modifier = DRM_FORMAT_MOD_ARM_16X16_BLOCK_U_INTERLEAVED;
++      } else {
++         out->modifier = DRM_FORMAT_MOD_LINEAR;
++      }
++   }
++
+ #ifdef HAS_FREEDRENO
+    uint32_t gmsm = ('g' << 24) | ('m' << 16) | ('s' << 8) | 'm';
+    if (hnd->handle->numInts >= 2 && hnd->handle->data[hnd->handle->numFds] == gmsm) {
