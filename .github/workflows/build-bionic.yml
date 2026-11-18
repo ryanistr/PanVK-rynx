@@ -1,0 +1,52 @@
+name: Build PanVK-rynx (bionic)
+
+# Companion to release.yml: builds the Android/bionic driver from the same tag and patches
+# as the glibc ICD, so both targets are compiled and gate-checked in CI on every patch change.
+on:
+  push:
+    paths:
+      - 'build-bionic.sh'
+      - 'patches/**'
+      - '.github/workflows/build-bionic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            python3-pip patch git ninja-build pkg-config libdrm-dev binutils \
+            python3-mako python3-yaml python3-packaging \
+            llvm-18-dev libclang-18-dev libclc-18-dev libllvmspirvlib-18-dev \
+            spirv-tools clang zstd file curl ca-certificates unzip >/dev/null
+          python3 -m pip install --break-system-packages -U 'meson>=1.4'
+          meson --version
+
+      - name: Install Android NDK r27c
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/ndk.zip" \
+            https://dl.google.com/android/repository/android-ndk-r27c-linux.zip
+          unzip -q "$RUNNER_TEMP/ndk.zip" -d "$RUNNER_TEMP"
+          test -x "$RUNNER_TEMP/android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
+          echo "ANDROID_NDK_ROOT=$RUNNER_TEMP/android-ndk-r27c" >> "$GITHUB_ENV"
+
+      - name: Build bionic PanVK-rynx
+        run: bash build-bionic.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: panvk-rynx-bionic
+          path: |
+            PanVK-rynx-*-bionic.tzst
+            PanVK-rynx-*-bionic.tzst.sha256
