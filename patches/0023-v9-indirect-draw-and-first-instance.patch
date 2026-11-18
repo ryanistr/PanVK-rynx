@@ -3,8 +3,9 @@ Subject: 0023
 ---
  src/panfrost/libpan/draw_helper.cl            | 104 ++++++++++
  src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c    | 178 +++++++++++++++---
+ src/panfrost/vulkan/panvk_cmd_draw.h          |   2 +-
  .../vulkan/panvk_vX_physical_device.c         |   2 +-
- 3 files changed, 258 insertions(+), 26 deletions(-)
+ 4 files changed, 259 insertions(+), 27 deletions(-)
 
 diff --git a/src/panfrost/libpan/draw_helper.cl b/src/panfrost/libpan/draw_helper.cl
 index a61aa32..6765c98 100644
@@ -414,6 +415,19 @@ index 4821e6b..8df0d96 100644
     struct panvk_draw_info info = {
        .index = panvk_draw_info_index(cmdbuf, 0),
        .indirect.buffer_dev_addr =
+diff --git a/src/panfrost/vulkan/panvk_cmd_draw.h b/src/panfrost/vulkan/panvk_cmd_draw.h
+index 47f3755..4d33a93 100644
+--- a/src/panfrost/vulkan/panvk_cmd_draw.h
++++ b/src/panfrost/vulkan/panvk_cmd_draw.h
+@@ -236,7 +236,7 @@ struct panvk_cmd_graphics_state {
+       unsigned count;
+    } vb;
+ 
+-#if PAN_ARCH >= 10
++#if PAN_ARCH >= 9
+    struct {
+       uint32_t base_instance;
+       uint32_t attribs_changing_on_base_instance;
 diff --git a/src/panfrost/vulkan/panvk_vX_physical_device.c b/src/panfrost/vulkan/panvk_vX_physical_device.c
 index 8efcecf..9c90b8a 100644
 --- a/src/panfrost/vulkan/panvk_vX_physical_device.c
