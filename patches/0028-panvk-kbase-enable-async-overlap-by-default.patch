@@ -1,0 +1,62 @@
+From 4f38f1c5b4b2623e78498872c2c7b074c9404cc8 Mon Sep 17 00:00:00 2001
+From: ryanistr <ridho.holy@gmail.com>
+Date: Thu, 19 Nov 2026 00:06:55 +0700
+Subject: [PATCH] panvk/kbase: enable async submission and heap-split overlap
+ by default
+
+---
+ src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c      | 2 +-
+ src/panfrost/vulkan/jm/panvk_vX_gpu_queue_kbase.c | 2 +-
+ src/panfrost/vulkan/panvk_kbase_async.c           | 7 ++++---
+ 3 files changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+index 96463cf..accd8ca 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+@@ -355,7 +355,7 @@ panvk_overlap_enabled(void)
+    static int on = -1;
+    if (on < 0) {
+       const char *e = getenv("PANVK_OVERLAP");
+-      on = (e && e[0] != '0') ? 1 : 0;
++      on = (!e || e[0] != '0') ? 1 : 0;
+    }
+    return on != 0;
+ }
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue_kbase.c b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue_kbase.c
+index 3b4507f..c8857fe 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue_kbase.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue_kbase.c
+@@ -865,7 +865,7 @@ panvk_overlap_enabled(void)
+    static int on = -1;
+    if (on < 0) {
+       const char *e = getenv("PANVK_OVERLAP");
+-      on = (e && e[0] != '0') ? 1 : 0;
++      on = (!e || e[0] != '0') ? 1 : 0;
+    }
+    return on != 0;
+ }
+diff --git a/src/panfrost/vulkan/panvk_kbase_async.c b/src/panfrost/vulkan/panvk_kbase_async.c
+index 10d59d7..41fe5de 100644
+--- a/src/panfrost/vulkan/panvk_kbase_async.c
++++ b/src/panfrost/vulkan/panvk_kbase_async.c
+@@ -90,12 +90,13 @@ panvk_kbase_async_init(struct panvk_device *dev)
+ {
+    simple_mtx_init(&dev->async.lock, mtx_plain);
+    dev->async.init = true;
++   const char *async_env = getenv("PANVK_ASYNC");
++   const char *overlap_env = getenv("PANVK_OVERLAP");
+    dev->async.enabled =
+-      kbase_async_is_kbase(dev) && getenv("PANVK_ASYNC") != NULL;
++      kbase_async_is_kbase(dev) && (!async_env || async_env[0] != '0');
+    dev->async.lost = false;
+    dev->async.overlap =
+-      kbase_async_is_kbase(dev) && getenv("PANVK_OVERLAP") != NULL &&
+-      getenv("PANVK_OVERLAP")[0] != '0';
++      kbase_async_is_kbase(dev) && (!overlap_env || overlap_env[0] != '0');
+    dev->async.seqno = 0;
+    dev->async.completed_seqno = 0;
+    dev->async.bag = NULL;
+-- 
+2.56.1
+

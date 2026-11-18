@@ -30,6 +30,7 @@ Patch bodies are kept byte-for-byte so they continue to apply to that tag.
 | `0025-panvk-android-fallback-linear-modifier.patch` | Map `DRM_FORMAT_MOD_INVALID` from `u_gralloc_fallback` on single-plane ANB/AHB images to `DRM_FORMAT_MOD_LINEAR` and guard `mod_handler == NULL` in `panvk_image_init_layouts`, preventing a SIGSEGV on Android swapchain `vkCreateImage`. |
 | `0026-android-find-dmabuf-fd-in-native-handle.patch` | Scan `native_handle_t` fds for the `dmabuf` fd instead of assuming `handle->data[0]`, fixing `VK_ERROR_INVALID_EXTERNAL_HANDLE` on MediaTek gralloc where `data[0]` is `anon_inode:gralloc_extra` and `data[1]` is `/dmabuf:Gralloc`. |
 | `0027-panvk-kbase-dont-set-drm-syncobj-copy-payloads.patch` | Leave `device->vk.copy_sync_payloads` NULL on kbase devices instead of setting `vk_drm_syncobj_copy_payloads`, so `vk_common_QueueSignalReleaseImageANDROID` uses `QueueSubmit2` with `kbase_cpu_sync` instead of failing DRM syncobj ioctls with `VK_ERROR_UNKNOWN`. |
+| `0028-panvk-kbase-enable-async-overlap-by-default.patch` | Enable `PANVK_ASYNC` and `PANVK_OVERLAP` by default on kbase (`PANVK_ASYNC=0` / `PANVK_OVERLAP=0` to disable) so CPU command recording/presentation overlaps GPU execution with heap-split pipelining. |
 
 0001-0003 and 0009-0010 are specific to the G77 bring-up path. 0004-0008 are CSF fixes for
 the other Mali generations compiled into the same binary; they do not change arch-9 JM
