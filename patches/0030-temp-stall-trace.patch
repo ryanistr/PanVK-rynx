@@ -1,0 +1,113 @@
+From b0ce12f8a3bcfae71a5bbb6ce4ad92ae7ae97080 Mon Sep 17 00:00:00 2001
+From: ryanistr <ridho.holy@gmail.com>
+Date: Thu, 19 Nov 2026 00:36:17 +0700
+Subject: [PATCH] temp: log >100ms stalls in kbase sync/submit to Android
+ logcat
+
+---
+ .../vulkan/jm/panvk_vX_gpu_queue_kbase.c      |  7 +++++
+ src/panfrost/vulkan/panvk_physical_device.c   | 30 +++++++++++++++++++
+ 2 files changed, 37 insertions(+)
+
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue_kbase.c b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue_kbase.c
+index c8857fe..cd2554b 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue_kbase.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue_kbase.c
+@@ -1585,6 +1585,7 @@ panvk_per_arch(kbase_jm_submit)(struct vk_queue *vk_queue,
+    uint64_t targets[PANVK_KBASE_SYNC_TARGET_COUNT] = {};
+    uint64_t async_seqno = 0;
+    const bool want_async = panvk_kbase_async_is_enabled(dev);
++   int64_t t_sub0 = os_time_get_nano();
+ 
+    if (unlikely(getenv("PANVK_VERBOSE")))
+       fprintf(stderr, "PANVKDBG kbase submit: wait=%u signal=%u cmdbuf=%u\n",
+@@ -1764,5 +1765,11 @@ panvk_per_arch(kbase_jm_submit)(struct vk_queue *vk_queue,
+       }
+    }
+ 
++   int64_t dt_sub = (os_time_get_nano() - t_sub0) / 1000000;
++   if (dt_sub > 100) {
++      extern void panvk_stall_log(const char *tag, int64_t ms, uint64_t extra);
++      panvk_stall_log("kbase_jm_submit", dt_sub, submit->command_buffer_count);
++   }
++
+    return VK_SUCCESS;
+ }
+diff --git a/src/panfrost/vulkan/panvk_physical_device.c b/src/panfrost/vulkan/panvk_physical_device.c
+index 5e02d11..81169f5 100644
+--- a/src/panfrost/vulkan/panvk_physical_device.c
++++ b/src/panfrost/vulkan/panvk_physical_device.c
+@@ -829,12 +829,34 @@ kbase_cpu_sync_wait_one(struct vk_device *device, struct kbase_cpu_sync *ks,
+    }
+ }
+ 
++#ifdef __ANDROID__
++#include <dlfcn.h>
++void panvk_stall_log(const char *tag, int64_t ms, uint64_t extra);
++void
++panvk_stall_log(const char *tag, int64_t ms, uint64_t extra)
++{
++   static int (*p_log)(int, const char *, const char *, ...) = NULL;
++   static bool init = false;
++   if (!init) {
++      init = true;
++      p_log = dlsym(RTLD_DEFAULT, "__android_log_print");
++   }
++   if (p_log)
++      p_log(6 /* ERROR */, "PANVK_STALL", "%s took %lld ms (extra=%llu)",
++            tag, (long long)ms, (unsigned long long)extra);
++}
++#else
++void panvk_stall_log(const char *tag, int64_t ms, uint64_t extra);
++void panvk_stall_log(UNUSED const char *tag, UNUSED int64_t ms, UNUSED uint64_t extra) {}
++#endif
++
+ static VkResult
+ kbase_cpu_sync_wait_many(struct vk_device *device,
+                          uint32_t wait_count, const struct vk_sync_wait *waits,
+                          enum vk_sync_wait_flags wait_flags,
+                          uint64_t abs_timeout_ns)
+ {
++   int64_t t0 = os_time_get_nano();
+    bool wait_any = !!(wait_flags & VK_SYNC_WAIT_ANY);
+ 
+    if (!wait_any) {
+@@ -846,6 +868,9 @@ kbase_cpu_sync_wait_many(struct vk_device *device,
+          if (result != VK_SUCCESS)
+             return result;
+       }
++      int64_t dt = (os_time_get_nano() - t0) / 1000000;
++      if (dt > 100)
++         panvk_stall_log("wait_many", dt, wait_count);
+       return VK_SUCCESS;
+    }
+ 
+@@ -931,6 +956,7 @@ kbase_cpu_sync_import_sync_file(struct vk_device *device, struct vk_sync *sync,
+       }
+       struct pollfd pfd = { .fd = sync_file, .events = POLLIN };
+       int waited_ms = 0;
++      int64_t t0 = os_time_get_nano();
+       while (waited_ms < 2000) {
+          int r = poll(&pfd, 1, 100);
+          if (r > 0)
+@@ -939,6 +965,9 @@ kbase_cpu_sync_import_sync_file(struct vk_device *device, struct vk_sync *sync,
+             break;
+          waited_ms += 100;
+       }
++      int64_t dt = (os_time_get_nano() - t0) / 1000000;
++      if (dt > 100)
++         panvk_stall_log("import_sync_file", dt, (uint64_t)sync_file);
+    }
+    return kbase_cpu_sync_signal(device, sync, 0);
+ }
+@@ -994,6 +1023,7 @@ kbase_cpu_sync_export_sync_file(struct vk_device *device, struct vk_sync *sync,
+             *sync_file = fence.fd;
+             return VK_SUCCESS;
+          }
++         panvk_stall_log("export_sync_file_trigger_fail", (int64_t)sq, dep);
+       }
+    }
+ 
+-- 
+2.56.1
+
