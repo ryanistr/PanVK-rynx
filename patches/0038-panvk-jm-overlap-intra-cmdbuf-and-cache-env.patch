@@ -1,0 +1,140 @@
+--- a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue_kbase.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue_kbase.c
+@@ -1131,8 +1131,9 @@
+    unsigned nr_atoms = 0;
+    uint8_t prev_atom = 0;
+    uint8_t half_frag[2] = { 0, 0 };
+-   bool first_vtc = true;
+-   bool first_frag = true;
++   uint8_t prev_vtc = 0;
++   uint8_t prev_frag = 0;
++   uint8_t local_half_frag[2] = { 0, 0 };
+    for (unsigned k = 0; k < nr_wait_fds; k++) {
+       struct base_jd_atom_v2 *a = &atoms[nr_atoms];
+       memset(a, 0, sizeof(*a));
+@@ -1162,11 +1163,14 @@
+       dev->async.atom_bag[id] = bag;
+       dev->async.last_atom = id;
+       prev_atom = id;
++      prev_vtc = id;
++      prev_frag = id;
+       nr_atoms++;
+    }
+    for (unsigned b = 0; b < nr_preps; b++) {
+       struct panvk_batch *batch = preps[b].batch;
+       memcpy(extres[b], preps[b].extres, sizeof(extres[b]));
++      uint8_t batch_vtc = 0;
+ 
+       if (batch->vtc_jc.first_job) {
+          struct base_jd_atom_v2 *a = &atoms[nr_atoms];
+@@ -1190,21 +1194,23 @@
+          a->jc = batch->vtc_jc.first_job;
+          a->atom_number = id;
+          a->core_req = preps[b].vtc_core;
+-         if (prev_atom) {
+-            a->pre_dep[0].atom_id = prev_atom;
+-            a->pre_dep[0].dependency_type = 1; /* DATA */
+-         }
+-         if (first_vtc && batch->frag_jc.first_job) {
+-            /* Cross-bag edge: wait only for the in-flight fragment job
+-             * that owns this batch's heap half (0 = none/stale). */
+-            uint8_t hid = dev->async.half_frag[batch->heap_half & 1];
++         if (batch->frag_jc.first_job) {
++            if (prev_vtc) {
++               a->pre_dep[0].atom_id = prev_vtc;
++               a->pre_dep[0].dependency_type = 1; /* DATA */
++            }
++            uint8_t hid = local_half_frag[batch->heap_half & 1];
++            if (!hid)
++               hid = dev->async.half_frag[batch->heap_half & 1];
+             if (hid && !dev->async.atom_bag[hid])
+                hid = 0;
+             if (hid && hid != a->pre_dep[0].atom_id) {
+                a->pre_dep[1].atom_id = hid;
+                a->pre_dep[1].dependency_type = 1; /* DATA */
+             }
+-            first_vtc = false;
++         } else if (prev_atom) {
++            a->pre_dep[0].atom_id = prev_atom;
++            a->pre_dep[0].dependency_type = 1; /* DATA */
+          }
+          if (preps[b].nr_extres) {
+             a->extres_list = (uint64_t)(uintptr_t)&extres[b][0];
+@@ -1213,6 +1219,8 @@
+          }
+          dev->async.atom_bag[id] = bag;
+          dev->async.last_atom = id;
++         batch_vtc = id;
++         prev_vtc = id;
+          prev_atom = id;
+          nr_atoms++;
+       }
+@@ -1239,21 +1247,17 @@
+          a->jc = batch->frag_jc.first_job;
+          a->atom_number = id;
+          a->core_req = preps[b].frag_core;
+-         if (prev_atom) {
+-            a->pre_dep[0].atom_id = prev_atom;
++         uint8_t dep0 = batch_vtc ? batch_vtc : prev_atom;
++         if (dep0) {
++            a->pre_dep[0].atom_id = dep0;
+             a->pre_dep[0].dependency_type = 1; /* DATA */
+          }
+-         if (first_frag) {
+-            /* Cross-bag edge: fragment work stays serialized across bags
+-             * (matches the reference design); vertex work is what overlaps. */
+-            uint8_t fid = dev->async.last_frag;
+-            if (fid && !dev->async.atom_bag[fid])
+-               fid = 0;
+-            if (fid && fid != a->pre_dep[0].atom_id) {
+-               a->pre_dep[1].atom_id = fid;
+-               a->pre_dep[1].dependency_type = 1; /* DATA */
+-            }
+-            first_frag = false;
++         uint8_t fid = prev_frag ? prev_frag : dev->async.last_frag;
++         if (fid && !dev->async.atom_bag[fid])
++            fid = 0;
++         if (fid && fid != a->pre_dep[0].atom_id) {
++            a->pre_dep[1].atom_id = fid;
++            a->pre_dep[1].dependency_type = 1; /* DATA */
+          }
+          if (preps[b].nr_extres) {
+             a->extres_list = (uint64_t)(uintptr_t)&extres[b][0];
+@@ -1261,9 +1265,11 @@
+             a->core_req |= BASE_JD_REQ_EXTERNAL_RESOURCES;
+          }
+          dev->async.atom_bag[id] = bag;
++         local_half_frag[batch->heap_half & 1] = id;
+          half_frag[batch->heap_half & 1] = id;
+          dev->async.last_frag = id;
+          dev->async.last_atom = id;
++         prev_frag = id;
+          prev_atom = id;
+          nr_atoms++;
+       }
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -1451,7 +1451,10 @@
+    const struct panvk_shader_variant *vs = panvk_shader_hw_variant(cmdbuf->state.gfx.vs.shader);
+    VkResult result;
+ 
+-   if (unlikely(getenv("PANVK_VERBOSE")))
++   static int verbose = -1;
++   if (unlikely(verbose < 0))
++      verbose = getenv("PANVK_VERBOSE") ? 1 : 0;
++   if (unlikely(verbose))
+       fprintf(stderr, "PANVKDBG panvk_cmd_draw: vs=%p cur_batch=%p\n",
+               (void *)vs, (void *)cmdbuf->cur_batch);
+    /* If there's no vertex shader, we can skip the draw. */
+@@ -2621,7 +2624,10 @@
+          }
+       }
+ 
+-       if (unlikely(getenv("PANVK_VERBOSE"))) {
++       static int verbose = -1;
++   if (unlikely(verbose < 0))
++      verbose = getenv("PANVK_VERBOSE") ? 1 : 0;
++   if (unlikely(verbose)) {
+           const uint32_t *jw = (const uint32_t *)job.cpu;
+           fprintf(stderr,
+                   "PANVKDBG malloc l=%u w0=%08x w1=%08x w2=%08x w3=%08x "
