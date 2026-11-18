@@ -12,7 +12,7 @@ Device: Infinix GT 10 Pro / X6739 (MT6893, Mali-G77 MC9, `gpu_id 0x90800011`), s
 
 | target | config | status | artifact |
 |---|---|---|---|
-| glibc / DroidDeck (aarch64) | `build.sh` as shipped (`-Dplatforms=wayland,x11 -Dpanvk-use-kbase=true -Dpanfrost-kmds=kbase,panthor`) | **via GitHub Actions** (`ubuntu-24.04-arm`, `.github/workflows/release.yml`, triggered by this push to `patches/**`) | `PanVK-rynx-*.tzst` CI artifact |
+| glibc / DroidDeck (aarch64) | `build.sh` as shipped (`-Dplatforms=wayland,x11 -Dpanvk-use-kbase=true -Dpanfrost-kmds=kbase,panthor`) | **CI success 2026-11-18** ([run 44233374822](https://github.com/ryanistr/PanVK-rynx/actions/runs/44233374822), `ubuntu-24.04-arm`, 3m46s) | `PanVK-rynx-1.2.0.tzst`, sha256 `087a8adf…5b36ef` |
 | Android / bionic (AArch64) | `meson` cross, NDK r27c, `-Dplatforms=android -Dandroid-stub=true -Dpanvk-use-kbase=true`, system host codegen tools | built and verified 2026-11-18 (local verification already complete; no further local builds) | `libvulkan_panvk_p13.so` (20,112,208 B, ELF64 AArch64, Android 35, NDK r27c, stripped) + `meta-p13.json` |
 
 The bionic build was verified with fresh evidence: native host codegen tools
@@ -25,7 +25,10 @@ removed) live in the temp tree only, not in this repo.
 
 Both builds use the same patched source tree (all 12 patches apply cleanly to
 `apexspan-svg/mesa-panvk-mali-g57` tag `v1.2.0`, HEAD `66306eb`; re-verified 2026-11-18,
-each applied successfully by `build.sh` inside the arm64 container).
+with `build.sh` applying each of them successfully in the arm64 CI job). The CI artifact
+contains `usr/lib/libvulkan_panvk.so`, `usr/share/vulkan/icd.d/panvk_icd.aarch64.json` and
+`meta.json` (`gpuArch [9,10,11]`). Because this was a push build it has no `-p<n>` suffix —
+releases are created only by `workflow_dispatch` with an explicit tag, and p7 was not rebuilt.
 
 ## Quality comparison (`libvkvalidate --check`, all 100 listed IDs)
 
