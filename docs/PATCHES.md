@@ -17,6 +17,7 @@ Patch bodies are kept byte-for-byte so they continue to apply to that tag.
 | `0010-dump-the-real-swapchain-bo-size.patch` | Widens the native-BO debug dump from 640x480x4 only to also include 1600x720x4 (4608000 bytes), the swapchain size actually used in a session, so the guest's own post-CSYNC view of the presented buffer exists. |
 | `0011-jm-merged-submit-by-default.patch` | The kbase JM queue submitted and waited for every batch in turn, leaving the GPU idle between batches; the merged one-bag-per-submit path existed but was env-gated. Makes it the default; `PANVK_MERGE_SUBMIT=0` restores the old path. |
 | `0012-v9-compute-scratch-floor.patch` | A v9 compute shader that spills gets 4 KiB of scratch per thread, the minimum this generation needs; under-allocating lets the job run until the kernel stops it on timeout. |
+| `0014-compat-nested-map.patch` | A second `vkMapMemory` on an already-mapped allocation returns the existing pointer (as the stock driver does) instead of `VK_ERROR_MEMORY_MAP_FAILED`; vktest `compat.nested_map`. |
 
 0001-0003 and 0009-0010 are specific to the G77 bring-up path. 0004-0008 are CSF fixes for
 the other Mali generations compiled into the same binary; they do not change arch-9 JM
