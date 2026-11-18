@@ -1,0 +1,155 @@
+From 296b10bddc1b0ec872783bcea1f727a7b8820666 Mon Sep 17 00:00:00 2001
+From: ryanistr <ridho.holy@gmail.com>
+Date: Wed, 18 Nov 2026 23:40:18 +0700
+Subject: [PATCH] vk_android/panvk/u_gralloc: scan native_handle_t for dmabuf
+ fd
+
+---
+ src/panfrost/vulkan/panvk_android.c     |  2 +-
+ src/util/u_gralloc/u_gralloc_fallback.c | 25 ++++++++++++++++++------
+ src/vulkan/runtime/vk_android.c         | 26 ++++++++++++++++++++++---
+ src/vulkan/runtime/vk_android.h         |  2 ++
+ 4 files changed, 45 insertions(+), 10 deletions(-)
+
+diff --git a/src/panfrost/vulkan/panvk_android.c b/src/panfrost/vulkan/panvk_android.c
+index 52e0e8d..7901a60 100644
+--- a/src/panfrost/vulkan/panvk_android.c
++++ b/src/panfrost/vulkan/panvk_android.c
+@@ -270,7 +270,7 @@ panvk_android_import_ahb_memory(VkDevice device,
+    VK_FROM_HANDLE(vk_device, dev, device);
+    const native_handle_t *handle = AHardwareBuffer_getNativeHandle(ahb);
+    assert(handle && handle->numFds > 0);
+-   int dma_buf_fd = handle->data[0];
++   int dma_buf_fd = vk_android_find_dmabuf_fd(handle);
+    VkResult result;
+ 
+    VkImage img_handle = VK_NULL_HANDLE;
+diff --git a/src/util/u_gralloc/u_gralloc_fallback.c b/src/util/u_gralloc/u_gralloc_fallback.c
+index 44fb32d..1a20bb7 100644
+--- a/src/util/u_gralloc/u_gralloc_fallback.c
++++ b/src/util/u_gralloc/u_gralloc_fallback.c
+@@ -16,13 +16,31 @@
+ 
+ #include <dlfcn.h>
+ #include <errno.h>
++#include <stdio.h>
+ #include <string.h>
++#include <unistd.h>
+ 
+ struct fallback_gralloc {
+    struct u_gralloc base;
+    gralloc_module_t *gralloc_module;
+ };
+ 
++static int
++fallback_find_dmabuf_fd(const native_handle_t *handle)
++{
++   for (int i = 0; i < handle->numFds; i++) {
++      char p[64], target[128];
++      snprintf(p, sizeof(p), "/proc/self/fd/%d", handle->data[i]);
++      ssize_t len = readlink(p, target, sizeof(target) - 1);
++      if (len > 0) {
++         target[len] = '\0';
++         if (strstr(target, "dmabuf") || strstr(target, "dma"))
++            return handle->data[i];
++      }
++   }
++   return handle->data[0];
++}
++
+ /* returns # of fds, and by reference the actual fds */
+ static unsigned
+ get_native_buffer_fds(const native_handle_t *handle, int fds[3])
+@@ -30,11 +48,6 @@ get_native_buffer_fds(const native_handle_t *handle, int fds[3])
+    if (!handle)
+       return 0;
+ 
+-   /*
+-    * Various gralloc implementations exist, but the dma-buf fd tends
+-    * to be first. Access it directly to avoid a dependency on specific
+-    * gralloc versions.
+-    */
+    for (int i = 0; i < handle->numFds; i++)
+       fds[i] = handle->data[i];
+ 
+@@ -144,7 +157,7 @@ fallback_gralloc_get_buffer_info(struct u_gralloc *gralloc,
+    out->drm_fourcc = drm_fourcc;
+    out->modifier = DRM_FORMAT_MOD_INVALID;
+    out->num_planes = num_planes;
+-   out->fds[0] = hnd->handle->data[0];
++   out->fds[0] = fallback_find_dmabuf_fd(hnd->handle);
+    out->strides[0] = stride;
+ 
+ #ifdef HAS_FREEDRENO
+diff --git a/src/vulkan/runtime/vk_android.c b/src/vulkan/runtime/vk_android.c
+index fd9ee5d..c8d2307 100644
+--- a/src/vulkan/runtime/vk_android.c
++++ b/src/vulkan/runtime/vk_android.c
+@@ -189,6 +189,25 @@ vk_gralloc_to_drm_explicit_layout(
+    return VK_SUCCESS;
+ }
+ 
++int
++vk_android_find_dmabuf_fd(const void *native_handle)
++{
++   const native_handle_t *handle = native_handle;
++   if (!handle || handle->numFds <= 0)
++      return -1;
++   for (int i = 0; i < handle->numFds; i++) {
++      char p[64], target[128];
++      snprintf(p, sizeof(p), "/proc/self/fd/%d", handle->data[i]);
++      ssize_t len = readlink(p, target, sizeof(target) - 1);
++      if (len > 0) {
++         target[len] = '\0';
++         if (strstr(target, "dmabuf") || strstr(target, "dma"))
++            return handle->data[i];
++      }
++   }
++   return handle->data[0];
++}
++
+ VkResult
+ vk_android_import_anb_memory(struct vk_device *device,
+                              struct vk_image *image,
+@@ -197,7 +216,7 @@ vk_android_import_anb_memory(struct vk_device *device,
+ {
+    assert(anb && anb->handle && anb->handle->numFds > 0);
+ 
+-   int dma_buf_fd = anb->handle->data[0];
++   int dma_buf_fd = vk_android_find_dmabuf_fd(anb->handle);
+ 
+    /* Query image memory requirements for size and supported memory types */
+    VkMemoryRequirements mem_reqs;
+@@ -1088,13 +1107,14 @@ vk_common_GetAndroidHardwareBufferPropertiesANDROID(
+ 
+    const native_handle_t *handle = AHardwareBuffer_getNativeHandle(buffer);
+    assert(handle && handle->numFds > 0);
+-   pProperties->allocationSize = lseek(handle->data[0], 0, SEEK_END);
++   int dma_buf_fd = vk_android_find_dmabuf_fd(handle);
++   pProperties->allocationSize = lseek(dma_buf_fd, 0, SEEK_END);
+ 
+    VkMemoryFdPropertiesKHR fd_props = {
+       .sType = VK_STRUCTURE_TYPE_MEMORY_FD_PROPERTIES_KHR,
+    };
+    result = device->dispatch_table.GetMemoryFdPropertiesKHR(
+-      device_h, VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT, handle->data[0],
++      device_h, VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT, dma_buf_fd,
+       &fd_props);
+    if (result != VK_SUCCESS)
+       return result;
+diff --git a/src/vulkan/runtime/vk_android.h b/src/vulkan/runtime/vk_android.h
+index 8dc990a..e12fec1 100644
+--- a/src/vulkan/runtime/vk_android.h
++++ b/src/vulkan/runtime/vk_android.h
+@@ -42,6 +42,8 @@ struct vk_image;
+ 
+ struct u_gralloc *vk_android_get_ugralloc(void);
+ 
++int vk_android_find_dmabuf_fd(const void *native_handle);
++
+ VkResult vk_android_import_anb(struct vk_device *device,
+                                const VkImageCreateInfo *pCreateInfo,
+                                const VkAllocationCallbacks *alloc,
+-- 
+2.56.1
+
