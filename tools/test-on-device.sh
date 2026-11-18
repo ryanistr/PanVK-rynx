@@ -39,12 +39,19 @@ python3 - "$OUT_DIR" <<'PY'
 import json, glob, os, sys
 from collections import Counter
 out = sys.argv[1]
-raw = os.path.join(out, 'raw', 'vk_ci')
 res = {}
-for p in glob.glob(raw + '/*.json'):
-    j = json.load(open(p))
-    res[j['check']] = j
-logs = {os.path.basename(p)[:-4] for p in glob.glob(raw + '/*.log')}
+logs = set()
+for p in glob.glob(os.path.join(out, '**', '*.json'), recursive=True):
+    if os.path.basename(p) in ('identity.json', 'summary.json'):
+        continue
+    try:
+        j = json.load(open(p))
+    except Exception:
+        continue
+    if isinstance(j, dict) and 'check' in j:
+        res[j['check']] = j
+for p in glob.glob(os.path.join(out, '**', '*.log'), recursive=True):
+    logs.add(os.path.basename(p)[:-4])
 crashes = sorted(logs - set(res))
 counts = Counter(j.get('verdict') for j in res.values())
 summary = {
