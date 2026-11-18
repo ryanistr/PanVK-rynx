@@ -98,3 +98,31 @@ bionic build without 0011/0012 to separate patch effects from the fork baseline.
 **PanVK p13 is competitive on a simple barrier case, adds features, and 0011 measurably
 improves submit-bound work; it remains materially behind stock in occlusion-query cost and
 has several correctness/crash gaps, none attributable to 0011 so far.**
+
+## GH Actions builds of both targets and test of the CI artifact (2026-11-18)
+
+Both driver variants are now compiled by GitHub Actions from the same tag/patches:
+
+| target | workflow | run | result | artifact |
+|---|---|---|---|---|
+| glibc / DroidDeck | `.github/workflows/release.yml` (`ubuntu-24.04-arm`) | [44233374822](https://github.com/ryanistr/PanVK-rynx/actions/runs/44233374822) | success, 3m51s | `PanVK-rynx-1.2.0.tzst`, sha256 `087a8adf…5b36ef` |
+| bionic / Android | `.github/workflows/build-bionic.yml` (`ubuntu-24.04`, NDK r27c) | [44234211806](https://github.com/ryanistr/PanVK-rynx/actions/runs/44234211806) | success, 5m9s | `PanVK-rynx-1.2.0-bionic.tzst`, sha256 `c9b1607a…3854275` |
+
+Both artifacts were downloaded and inspected: sha256 matches the published checksum; archive
+contains `usr/lib/libvulkan_panvk.so`, `usr/share/vulkan/icd.d/panvk_icd.aarch64.json` and
+`meta.json` (`gpuArch [9,10,11]`). The bionic `.so` is ELF64 AArch64, Android 35, NDK r27c,
+stripped, 20,111,952 bytes, with `PANVK_FD_INTEROP`.
+
+**On-device test of the CI bionic artifact** (installed as `panvk-ci` in `com.faux.vktest`,
+`102562537K104189`): identity loads via `adrenotools` as `Mali-G77 MC9`, driver `panvk`,
+`Mesa 26.3.0-devel (git-66306ebde5)`, api 1.3.354, BuildID `fd54395f…` matching the driver
+UUID. Full 100-check run (`/home/ryanistr/.hermes/cache/scratch/panvk/panvk_rx_ci_full/`):
+
+- **71 pass / 13 fail / 12 unsupported / 1 warn + 3 crashes** — *identical* to the locally
+  built p13 driver (zero verdict differences), confirming CI reproduces the same build.
+- Perf timings (best-of-3 ms, same device): `fb_local_barrier_overdraw` 1.44 vs stock 1.66
+  (slightly faster), `occlusion_query_in_pass_cost` 20.43 vs stock 1.06 (~19x slower, `warn`),
+  `fb_local_barrier_large_draws` fail vs stock pass, `bc_texture_stats` pass vs stock unsupported.
+
+Conclusion: both targets compile in CI; the CI bionic driver is functionally identical to the
+locally verified build and shows the same stock-comparison profile recorded above.
