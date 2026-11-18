@@ -164,3 +164,42 @@ was 22.15 ms with the patch (vs 20.43 ms before, within run-to-run variance), an
 These gaps require implementing missing JM functionality (XFB/geometry/tessellation and
 backend-specific barrier/query handling), not small configuration patches. They are left
 as documented known limitations rather than papering over them by hiding features.
+
+## 2026-11-18: 5x+ performance win from patch 0015, measured in GH Actions
+
+After patch `0013` was measured and reverted, two further patches were added and validated
+end-to-end in GitHub Actions:
+
+- `0014-compat-nested-map.patch` — duplicate `vkMapMemory` returns the existing pointer.
+- `0015-occlusion-query-batch-close.patch` — `vkCmdEndQuery` no longer force-closes the JM
+  batch. An N-query pass was creating N batches (and N cache flushes); the available-flag
+  WRITE_VALUE barrier still orders the result.
+
+**Builds:** glibc [44241597594](https://github.com/ryanistr/PanVK-rynx/actions/runs/44241597594)
+success, bionic [44241597590](https://github.com/ryanistr/PanVK-rynx/actions/runs/44241597590)
+success.
+
+**Automated on-device test:** the new `test-after-build.yml` workflow runs on the self-hosted
+`x6739` runner with adb, downloads the bionic artifact, installs it, and runs the full suite.
+Run [44242564765](https://github.com/ryanistr/PanVK-rynx/actions/runs/44242564765) succeeded
+and produced `vktest-results` with `summary.json` / `verdicts.txt`.
+
+| metric | before (p13) | after (0014+0015) | stock |
+|---|---|---|---|
+| pass | 71 | **73** | 54 |
+| fail | 13 | **12** | 2 |
+| unsupported | 12 | 12 | 39 |
+| warn | 1 | **0** | 0 |
+| crashes | 3 | 3 | 0 |
+| `perf.occlusion_query_in_pass_cost` | 20.43 ms (`warn`) | **1.16 ms (`pass`)** | 1.06 ms |
+| `perf.fb_local_barrier_overdraw` | 1.44 ms | 1.30 ms | 1.66 ms |
+| `compat.nested_map` | fail | **pass** | pass |
+
+**Occlusion queries are ~17.6x faster than the previous build and now match stock within
+~9%** — well beyond the 5x target. Surface effects: the `warn` disappeared and
+`compat.nested_map` flipped to pass. Correctness evidence inside the occlusion-query check
+(precise sample counts, availability after fence, wrong-colour pixels) all remained valid.
+
+Remaining gaps (12 fails + 3 crashes) are unchanged and are the deep JM backend issues
+documented above: XFB/geometry/tessellation, firstInstance/IDVS, MRT write-mask, framebuffer
+barriers, scratch-per-dispatch memory, and texel-buffer type punning.
