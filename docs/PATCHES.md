@@ -35,6 +35,7 @@ Patch bodies are kept byte-for-byte so they continue to apply to that tag.
 | `0030-panvk-kbase-defer-sync-file-wait-to-gpu.patch` | Stop polling imported `sync_file` fds synchronously on the CPU inside `kbase_cpu_sync_import_sync_file` (and stop closing `ks->import_fd` in `import_sync_file`), instead deferring CPU waits to `kbase_cpu_sync_wait_one` and letting `panvk_kbase_jm_submit_overlap` emit `KBASE_JD_REQ_SOFT_FENCE_WAIT` GPU atoms. |
 | `0031-panvk-kbase-export-sync-file-return-signaled.patch` | Drain `ks` and return `*sync_file = -1` (already signaled) in `kbase_cpu_sync_export_sync_file` instead of submitting a `KBASE_JD_REQ_SOFT_FENCE_TRIGGER` atom chained onto the device-global `async.last_atom`, which caused 1000-4000ms fence stalls under `VK_PRESENT_MODE_MAILBOX_KHR`. |
 | `0032-panvk-kbase-disable-overlap-by-default.patch` | Keep `PANVK_ASYNC=1` enabled by default on kbase while disabling `PANVK_OVERLAP` by default (`PANVK_OVERLAP=1` to opt in) to isolate/avoid multi-bag tiler-heap overlap stalls. |
+| `0033-panvk-kbase-disable-async-by-default.patch` | Disable `PANVK_ASYNC` by default on kbase (`PANVK_ASYNC=1` to opt in) to isolate whether asynchronous job-bag pipelining triggers the MediaTek `MDP` (`CMDQ`) 1000ms timeout under `VK_PRESENT_MODE_MAILBOX_KHR`. |
 
 0001-0003 and 0009-0010 are specific to the G77 bring-up path. 0004-0008 are CSF fixes for
 the other Mali generations compiled into the same binary; they do not change arch-9 JM
