@@ -3,11 +3,6 @@ name: Test PanVK on device after build
 # Runs the on-device vktest suite automatically after either CI build succeeds.
 # Requires a self-hosted runner with the X6739 (labels: x6739, android, adb) and adb root.
 on:
-  workflow_run:
-    workflows:
-      - 'Build PanVK-rynx (bionic)'
-      - 'Build and publish PanVK-rynx'
-    types: [completed]
   workflow_dispatch:
     inputs:
       run_id:
