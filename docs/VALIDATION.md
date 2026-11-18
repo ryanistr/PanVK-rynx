@@ -244,3 +244,22 @@ Versus the starting state (71 pass / 13 fail / 1 warn / 3 crashes, occlusion 20.
 driver now has **+3 passes, -5 fails, -1 warn, -3 crashes, and a ~20x faster occlusion path**.
 The remaining gaps need real JM implementations of indirect firstInstance handling, scratch
 reuse and framebuffer barriers, not batch-boundary tweaks.
+
+### RE of the remaining `core.indirect_first_instance` check (vktest 1.32)
+
+`libvkvalidate.so` (sha256 `e6ea3ab0…c0`, NDK r28c, stripped) was loaded in Ghidra via REA.
+The string `right half, firstInstance 1: the second colour` lives at `0x126f13`, xref'd from
+`0x17d0d8` inside `FUN_0017cb7c`. That function builds a 12-entry float3 vertex array
+(positions `-1/0/+1`, colours encoded as `0xbf800000`/`0x3f800000` etc.) and records two
+evidence points: `x=0x10,y=0x20` expects green `0xff00ff00` for `firstInstance 3`, and
+`x=0x30,y=0x20` expects red `0xffff0000` for `firstInstance 1`. The actual draw goes through
+`FUN_001717e8` (16 KiB vertex-buffer staging, callback `PTR_FUN_002158f8`).
+
+Conclusion from the driver side: the check is driven entirely by **per-instance vertex
+attributes** selected by `firstInstance`. The JM path already patches the attribute offset in
+`panlib_patch_attrib()` (`base_offset + instance.base * stride`) and fills
+`libpan_draw_helper_attrib_info.stride` in `panvk_draw_emit_attrib()`. Since the observed
+result is the *wrong colour* rather than no geometry, the failure is in the generated
+`panlib_draw_indirect_helper_struct` precomp helper or the IDVS hardware path, not in the
+driver-side attribute setup. Fixing it requires instrumenting the generated helper (or the
+IDVS descriptor) on-device, not another configuration patch.
