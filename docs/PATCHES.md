@@ -19,7 +19,6 @@ Patch bodies are kept byte-for-byte so they continue to apply to that tag.
 | `0012-v9-compute-scratch-floor.patch` | A v9 compute shader that spills gets 4 KiB of scratch per thread, the minimum this generation needs; under-allocating lets the job run until the kernel stops it on timeout. |
 | `0014-compat-nested-map.patch` | A second `vkMapMemory` on an already-mapped allocation returns the existing pointer (as the stock driver does) instead of `VK_ERROR_MEMORY_MAP_FAILED`; vktest `compat.nested_map`. |
 | `0015-occlusion-query-batch-close.patch` | `vkCmdEndQuery` closed the batch on every query, turning an N-query pass into N submits plus N cache flushes. Keep the batch open; the available-flag WRITE_VALUE barrier still orders the result. |
-| `0016-gate-unimplemented-jm-features.patch` | Geometry/tessellation/XFB are only implemented for CSF. Stop advertising them on v9 JM (where they segfault vktest); `PANVK_ADHOC_DXVK=1` restores the legacy DXVK compatibility advertisement. |
 | `0017-mrt-zero-write-mask.patch` | Keep a valid render-target format with zero channel writes when the colour write mask is 0, instead of leaving `PIPE_FORMAT_NONE` which makes the tiler overwrite preserved data. |
 | `0018-exclude-zero-write-mask-from-rt-mask.patch` | Exclude attachments with a zero colour write mask from the tiler render-target mask so they keep their previous contents. |
 
