@@ -32,6 +32,7 @@ Patch bodies are kept byte-for-byte so they continue to apply to that tag.
 | `0027-panvk-kbase-dont-set-drm-syncobj-copy-payloads.patch` | Leave `device->vk.copy_sync_payloads` NULL on kbase devices instead of setting `vk_drm_syncobj_copy_payloads`, so `vk_common_QueueSignalReleaseImageANDROID` uses `QueueSubmit2` with `kbase_cpu_sync` instead of failing DRM syncobj ioctls with `VK_ERROR_UNKNOWN`. |
 | `0028-panvk-kbase-enable-async-overlap-by-default.patch` | Enable `PANVK_ASYNC` and `PANVK_OVERLAP` by default on kbase (`PANVK_ASYNC=0` / `PANVK_OVERLAP=0` to disable) so CPU command recording/presentation overlaps GPU execution with heap-split pipelining. |
 | `0029-panvk-jm-v9-compute-task-axis-and-increment.patch` | Port `calculate_task_axis_and_increment` to JM v9 compute/precomp dispatches and enable `allow_merging_workgroups` instead of hardcoding `MALI_TASK_AXIS_Z` + `task_increment = 1`, which serialized 1D/2D compute dispatches onto a single core. |
+| `0030-panvk-kbase-defer-sync-file-wait-to-gpu.patch` | Stop polling imported `sync_file` fds synchronously on the CPU inside `kbase_cpu_sync_import_sync_file` (and stop closing `ks->import_fd` in `import_sync_file`), instead deferring CPU waits to `kbase_cpu_sync_wait_one` and letting `panvk_kbase_jm_submit_overlap` emit `KBASE_JD_REQ_SOFT_FENCE_WAIT` GPU atoms. |
 
 0001-0003 and 0009-0010 are specific to the G77 bring-up path. 0004-0008 are CSF fixes for
 the other Mali generations compiled into the same binary; they do not change arch-9 JM

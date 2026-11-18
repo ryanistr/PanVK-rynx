@@ -1,0 +1,125 @@
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue_kbase.c b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue_kbase.c
+index c8857fe..825cb5b 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue_kbase.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue_kbase.c
+@@ -1593,14 +1593,35 @@ panvk_per_arch(kbase_jm_submit)(struct vk_queue *vk_queue,
+    mesa_logd("panvk: kbase gpu_queue_submit start, cmd_count=%u",
+              submit->command_buffer_count);
+ 
++   bool has_batches = false;
++   for (uint32_t j = 0; j < submit->command_buffer_count && !has_batches; ++j) {
++      struct panvk_cmd_buffer *cmdbuf =
++         container_of(submit->command_buffers[j], struct panvk_cmd_buffer, vk);
++      has_batches = !list_is_empty(&cmdbuf->batches);
++   }
++
+    /* On kbase there are no DRM syncobjs: resolve incoming semaphore waits on
+-    * the CPU before emitting the jobs. */
++    * the CPU unless overlap mode will emit GPU SOFT_FENCE_WAIT atoms. */
+    if (submit->wait_count) {
+-      VkResult result = vk_sync_wait_many(&dev->vk, submit->wait_count,
+-                                          submit->waits, VK_SYNC_WAIT_COMPLETE,
+-                                          UINT64_MAX);
+-      if (result != VK_SUCCESS)
+-         return result;
++      if (want_async && dev->async.overlap && has_batches) {
++         for (uint32_t w = 0; w < submit->wait_count; w++) {
++            if (panvk_kbase_sync_get_import_fd(submit->waits[w].sync) >= 0)
++               continue;
++            VkResult result = vk_sync_wait_many(&dev->vk, 1,
++                                                &submit->waits[w],
++                                                VK_SYNC_WAIT_COMPLETE,
++                                                UINT64_MAX);
++            if (result != VK_SUCCESS)
++               return result;
++         }
++      } else {
++         VkResult result = vk_sync_wait_many(&dev->vk, submit->wait_count,
++                                             submit->waits,
++                                             VK_SYNC_WAIT_COMPLETE,
++                                             UINT64_MAX);
++         if (result != VK_SUCCESS)
++            return result;
++      }
+    }
+ 
+     pan_kmod_flush_bo_map_syncs(dev->kmod.dev);
+diff --git a/src/panfrost/vulkan/panvk_physical_device.c b/src/panfrost/vulkan/panvk_physical_device.c
+index 5e02d11..6d713cf 100644
+--- a/src/panfrost/vulkan/panvk_physical_device.c
++++ b/src/panfrost/vulkan/panvk_physical_device.c
+@@ -767,9 +767,49 @@ kbase_cpu_sync_wait_one(struct vk_device *device, struct kbase_cpu_sync *ks,
+    mtx_lock(&ks->mutex);
+    while (true) {
+       switch (ks->state) {
+-      case KBASE_CPU_SYNC_SIGNALED:
++      case KBASE_CPU_SYNC_SIGNALED: {
++         if (ks->import_fd >= 0 && !(wait_flags & VK_SYNC_WAIT_PENDING)) {
++            int orig_fd = ks->import_fd;
++            int poll_fd = fcntl(orig_fd, F_DUPFD_CLOEXEC, 3);
++            if (poll_fd < 0)
++               poll_fd = orig_fd;
++            mtx_unlock(&ks->mutex);
++            struct pollfd pfd = { .fd = poll_fd, .events = POLLIN };
++            int r = 0;
++            while (true) {
++               int timeout_ms = -1;
++               if (abs_timeout_ns == 0) {
++                  timeout_ms = 0;
++               } else if (abs_timeout_ns != UINT64_MAX) {
++                  uint64_t now_ns = os_time_get_nano();
++                  if (now_ns >= abs_timeout_ns) {
++                     r = 0;
++                     break;
++                  }
++                  uint64_t rem_ms = (abs_timeout_ns - now_ns + 999999ull) / 1000000ull;
++                  timeout_ms = rem_ms > INT_MAX ? INT_MAX : (int)rem_ms;
++               }
++               r = poll(&pfd, 1, timeout_ms);
++               if (r < 0 && errno == EINTR)
++                  continue;
++               break;
++            }
++            if (poll_fd != orig_fd)
++               close(poll_fd);
++            if (r == 0)
++               return VK_TIMEOUT;
++            if (r < 0)
++               return vk_errorf(device, VK_ERROR_UNKNOWN,
++                                "kbase sync_file poll failed");
++            mtx_lock(&ks->mutex);
++            if (ks->import_fd == orig_fd) {
++               close(ks->import_fd);
++               ks->import_fd = -1;
++            }
++         }
+          mtx_unlock(&ks->mutex);
+          return VK_SUCCESS;
++      }
+       case KBASE_CPU_SYNC_FAILED: {
+          VkResult result = ks->result;
+          mtx_unlock(&ks->mutex);
+@@ -914,9 +954,6 @@ kbase_cpu_sync_import_sync_file(struct vk_device *device, struct vk_sync *sync,
+ {
+    struct kbase_cpu_sync *ks = container_of(sync, struct kbase_cpu_sync, sync);
+    if (sync_file >= 0) {
+-      /* Validate against the kernel fence interface (best effort; failure
+-       * only downgrades to the plain poll below). The dup'd fd is retained
+-       * for GPU WAIT atoms emitted at submit time. */
+       struct panvk_device *pdev = to_panvk_device(device);
+       if (pdev->kmod.dev &&
+           kbase_kmod_fence_validate(pdev->kmod.dev, sync_file))
+@@ -927,7 +964,13 @@ kbase_cpu_sync_import_sync_file(struct vk_device *device, struct vk_sync *sync,
+          if (ks->import_fd >= 0)
+             close(ks->import_fd);
+          ks->import_fd = dup;
++         ks->state = KBASE_CPU_SYNC_SIGNALED;
++         ks->result = VK_SUCCESS;
++         ks->pending_data = NULL;
++         ks->pending_wait = NULL;
++         u_cnd_monotonic_broadcast(&ks->cond);
+          mtx_unlock(&ks->mutex);
++         return VK_SUCCESS;
+       }
+       struct pollfd pfd = { .fd = sync_file, .events = POLLIN };
+       int waited_ms = 0;
