@@ -1,0 +1,79 @@
+name: Test PanVK on device after build
+
+# Runs the on-device vktest suite automatically after either CI build succeeds.
+# Requires a self-hosted runner with the X6739 (labels: x6739, android, adb) and adb root.
+on:
+  workflow_run:
+    workflows:
+      - 'Build PanVK-rynx (bionic)'
+      - 'Build and publish PanVK-rynx'
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Bionic build run id to test (empty = latest successful bionic run)'
+        required: false
+        default: ''
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  on-device:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: [self-hosted, Linux, X64, x6739, android, adb]
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick the run to test
+        id: pick
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.run_id }}" ]; then
+            echo "run_id=${{ inputs.run_id }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.workflow_run.name }}" = "Build PanVK-rynx (bionic)" ]; then
+            echo "run_id=${{ github.event.workflow_run.id }}" >> "$GITHUB_OUTPUT"
+          else
+            ID=$(gh run list -R "${{ github.repository }}" --workflow "Build PanVK-rynx (bionic)" \
+                 --status success --limit 1 --json databaseId -q '.[0].databaseId')
+            echo "run_id=$ID" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download the built bionic artifact
+        run: |
+          set -euo pipefail
+          rm -rf artifact && mkdir artifact
+          gh run download "${{ steps.pick.outputs.run_id }}" -R "${{ github.repository }}" \
+            -n panvk-rynx-bionic -D artifact
+          ls -l artifact
+
+      - name: Run the device test suite
+        run: |
+          bash tools/test-on-device.sh artifact test-results | tee test-output.txt
+
+      - name: Publish the result as a job summary
+        run: |
+          set -euo pipefail
+          {
+            echo "## PanVK on-device test result"
+            echo
+            echo '```json'
+            cat test-results/summary.json
+            echo '```'
+            echo
+            echo "Build run: ${{ steps.pick.outputs.run_id }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vktest-results
+          path: |
+            test-results/summary.json
+            test-results/verdicts.txt
+            test-results/identity.json
+            test-output.txt
