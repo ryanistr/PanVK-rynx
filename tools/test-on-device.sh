@@ -6,7 +6,16 @@ set -euo pipefail
 
 ARTIFACT_DIR=${1:?artifact dir}
 OUT_DIR=${2:-test-results}
-DEVICE=${ADB_SERIAL:-102562537K104189}
+DEVICE=${ADB_SERIAL:-}
+if [ -z "$DEVICE" ]; then
+  # Prefer the known X6739 serial; fall back to any connected device (the
+  # handset also shows up over Wi-Fi adb with a changing TCP address).
+  if adb devices | grep -q '102562537K104189'; then
+    DEVICE=102562537K104189
+  else
+    DEVICE=$(adb devices | awk 'NR>1 && $2=="device" {print $1; exit}')
+  fi
+fi
 DRIVER=panvk-ci
 
 mkdir -p "$OUT_DIR" "$OUT_DIR/extract"
