@@ -37,6 +37,7 @@ Patch bodies are kept byte-for-byte so they continue to apply to that tag.
 | `0032-panvk-kbase-disable-overlap-by-default.patch` | Keep `PANVK_ASYNC=1` enabled by default on kbase while disabling `PANVK_OVERLAP` by default (`PANVK_OVERLAP=1` to opt in) to isolate/avoid multi-bag tiler-heap overlap stalls. |
 | `0033-panvk-kbase-disable-async-by-default.patch` | Disable `PANVK_ASYNC` by default on kbase (`PANVK_ASYNC=1` to opt in) to isolate whether asynchronous job-bag pipelining triggers the MediaTek `MDP` (`CMDQ`) 1000ms timeout under `VK_PRESENT_MODE_MAILBOX_KHR`. |
 | `0034-panvk-jm-skip-noop-pipeline-barrier-batch-split.patch` | Avoid closing and reopening JM batches in `CmdPipelineBarrier2` when the current batch has no jobs/events or when all barriers in `pDependencyInfo` have `srcAccessMask == 0` and only `TOP_OF_PIPE`/`HOST` `srcStageMask`. |
+| `0035-panvk-jm-v9-by-region-fb-barrier.patch` | Keep JM v9 render pass batches open on `VK_DEPENDENCY_BY_REGION_BIT` barriers inside `CmdPipelineBarrier2` and set `DCD_FLAGS_0.primitive_barrier` on the next draw instead of spilling/reloading the tilebuffer. |
 
 0001-0003 and 0009-0010 are specific to the G77 bring-up path. 0004-0008 are CSF fixes for
 the other Mali generations compiled into the same binary; they do not change arch-9 JM

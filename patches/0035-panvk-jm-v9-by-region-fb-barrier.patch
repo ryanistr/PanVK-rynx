@@ -1,0 +1,53 @@
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+index 253bcd8..a234ee9 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+@@ -507,6 +507,16 @@ panvk_per_arch(CmdPipelineBarrier2)(VkCommandBuffer commandBuffer,
+       if (panvk_dependency_is_noop(pDependencyInfo))
+          return;
+ 
++#if PAN_ARCH >= 9
++      /* A by-region barrier inside a render pass only orders tilebuffer work;
++       * keeping the batch open avoids 64x tiler spill/reload round trips. */
++      if (cmdbuf->state.gfx.render.layer_count > 0 &&
++          (pDependencyInfo->dependencyFlags & VK_DEPENDENCY_BY_REGION_BIT)) {
++         cmdbuf->state.gfx.render.fb.fb_barrier = true;
++         return;
++      }
++#endif
++
+       panvk_per_arch(cmd_close_batch)(cmdbuf);
+       panvk_per_arch(cmd_open_batch)(cmdbuf);
+    }
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+index 8f6e511..3581834 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -2251,6 +2251,7 @@ panvk_v9_build_dcd_flags(struct panvk_cmd_buffer *cmdbuf,
+       cfg.multisample_enable = msaa;
+       cfg.occlusion_query = cmdbuf->state.gfx.occlusion_query.mode;
+       cfg.alpha_to_coverage = alpha_to_coverage;
++      cfg.primitive_barrier = cmdbuf->state.gfx.render.fb.fb_barrier;
+       cfg.scissor_to_bounding_box = true;
+    }
+ 
+@@ -2415,6 +2416,7 @@ panvk_v9_draw(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_info *info)
+       return result;
+ 
+    panvk_v9_build_dcd_flags(cmdbuf, fs, &dcd_flags);
++   cmdbuf->state.gfx.render.fb.fb_barrier = false;
+ 
+    /* TLS desc is shared by the whole batch. */
+    result = panvk_per_arch(cmd_alloc_tls_desc)(cmdbuf, true);
+diff --git a/src/panfrost/vulkan/panvk_cmd_draw.h b/src/panfrost/vulkan/panvk_cmd_draw.h
+index 02530a1..4d33a93 100644
+--- a/src/panfrost/vulkan/panvk_cmd_draw.h
++++ b/src/panfrost/vulkan/panvk_cmd_draw.h
+@@ -100,6 +100,7 @@ struct panvk_rendering_state {
+ #endif
+       bool needs_load;
+       bool needs_store;
++      bool fb_barrier;
+    } fb;
+ 
+ #if PAN_ARCH >= 10
