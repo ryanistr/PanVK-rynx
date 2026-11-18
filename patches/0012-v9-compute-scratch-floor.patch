@@ -1,0 +1,43 @@
+panfrost: give a spilling v9 compute shader 4 KiB of scratch per thread
+
+On Valhall v9 a compute shader that runs out of registers keeps its live
+values in scratch memory, and once it spills the hardware needs at least
+4 KiB of it per thread.  The driver sizes thread-local storage from the size
+the shader asks for, which can be smaller, and the job then runs until the
+kernel stops it on its timeout.
+
+faux123 hit exactly this on the same GPU generation (Mali-G77 MC9, same
+MT6893 SoC): a compute shader in an emulator's opening cinematic ran at
+0.2 fps with a job killed every five seconds, 6-7 fps after the floor was
+added (no-gain notes, v0.16.0).  Frame time collapses rather than the app
+crashing, so it is easy to read as "this driver is slow here".
+
+Only shaders that already use scratch are affected, and only the per-thread
+size is clamped, so a shader that needs none still allocates none.  The
+allocation is per-thread-size * threads/core * cores, so on this GPU a single
+batch that spills takes about 9 MiB instead of a few KiB.
+
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_dispatch.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_dispatch.c
+index 3c1a8d7..9b4e2f1 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_dispatch.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_dispatch.c
+@@ -44,7 +44,18 @@
+ 
+    panvk_per_arch(cmd_alloc_tls_desc)(cmdbuf, false);
+ 
+-   batch->tlsinfo.tls.size = MAX2(cs->info.tls_size, batch->tlsinfo.tls.size);
++   /* A Valhall v9 compute shader that spills keeps its live values in scratch
++    * memory, and once it spills this generation needs at least 4 KiB of
++    * scratch per thread, more than the shader itself asks for.  Allocating
++    * less makes the job run until the kernel stops it on its timeout, which
++    * shows up as a frame rate collapse rather than a crash.  Shaders that
++    * need no scratch still get none. */
++   unsigned cs_tls_size = cs->info.tls_size;
++#if PAN_ARCH == 9
++   if (cs_tls_size > 0 && cs_tls_size < 4096)
++      cs_tls_size = 4096;
++#endif
++   batch->tlsinfo.tls.size = MAX2(cs_tls_size, batch->tlsinfo.tls.size);
+    batch->tlsinfo.wls.size = cs->info.wls_size;
+ 
+    if (batch->tlsinfo.wls.size) {
