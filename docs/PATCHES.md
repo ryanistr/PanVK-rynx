@@ -22,6 +22,7 @@ Patch bodies are kept byte-for-byte so they continue to apply to that tag.
 | `0016-gate-unimplemented-jm-features.patch` | Geometry/tessellation/XFB are only implemented for CSF. Stop advertising them on v9 JM (where they segfault vktest); `PANVK_ADHOC_DXVK=1` restores the legacy DXVK compatibility advertisement. |
 | `0017-mrt-zero-write-mask.patch` | Keep a valid render-target format with zero channel writes when the colour write mask is 0, instead of leaving `PIPE_FORMAT_NONE` which makes the tiler overwrite preserved data. |
 | `0018-exclude-zero-write-mask-from-rt-mask.patch` | Exclude attachments with a zero colour write mask from the tiler render-target mask so they keep their previous contents. |
+| `0019-dispatch-batch-reuse.patch` | Reuse the JM batch across consecutive compute dispatches instead of closing/reopening it each time, avoiding a fresh ~94 MiB scratch allocation and submit per dispatch. |
 
 0001-0003 and 0009-0010 are specific to the G77 bring-up path. 0004-0008 are CSF fixes for
 the other Mali generations compiled into the same binary; they do not change arch-9 JM
