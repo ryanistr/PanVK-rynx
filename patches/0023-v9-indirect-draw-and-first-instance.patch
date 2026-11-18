@@ -120,7 +120,7 @@ index a61aa32..6765c98 100644
 +}
 +#endif
 diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
-index 37f0467..66c67a6 100644
+index 4821e6b..0db715b 100644
 --- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
 +++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
 @@ -1823,6 +1823,8 @@ panvk_v9_emit_vs_attrib(const struct panvk_cmd_buffer *cmdbuf,
@@ -199,7 +199,7 @@ index 37f0467..66c67a6 100644
  }
  
  static void
-@@ -2317,10 +2343,34 @@ panvk_v9_draw(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_info *info)
+@@ -2318,10 +2344,34 @@ panvk_v9_draw(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_info *info)
        }
     }
  
@@ -235,7 +235,7 @@ index 37f0467..66c67a6 100644
     result = panvk_v9_prepare_fs_desc(cmdbuf);
     if (result != VK_SUCCESS)
        return result;
-@@ -2334,8 +2384,13 @@ panvk_v9_draw(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_info *info)
+@@ -2335,8 +2385,13 @@ panvk_v9_draw(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_info *info)
  
     panvk_per_arch(cmd_prepare_draw_sysvals)(cmdbuf, info, fs);
  
@@ -250,7 +250,7 @@ index 37f0467..66c67a6 100644
     if (result != VK_SUCCESS)
        return result;
     cmdbuf->state.gfx.vs.push_uniforms = vs_push_uniforms.gpu;
-@@ -2401,14 +2456,38 @@ panvk_v9_draw(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_info *info)
+@@ -2403,14 +2458,38 @@ panvk_v9_draw(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_info *info)
  
     for (uint32_t i = 0; i < layer_count; i++) {
        uint32_t layer = (view_mask != 0) ? u_bit_scan(&view_mask) : i;
@@ -293,7 +293,7 @@ index 37f0467..66c67a6 100644
  
        pan_section_pack(job.cpu, MALLOC_VERTEX_JOB, PRIMITIVE, cfg) {
           cfg.draw_mode = panvk_v9_translate_prim(info->prim);
-@@ -2521,28 +2600,24 @@ panvk_v9_draw(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_info *info)
+@@ -2523,28 +2602,24 @@ panvk_v9_draw(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_info *info)
  
        pan_section_pack(job.cpu, MALLOC_VERTEX_JOB, POSITION, cfg) {
           cfg.attribute_offset = 0;
@@ -326,7 +326,7 @@ index 37f0467..66c67a6 100644
         if (unlikely(getenv("PANVK_VERBOSE"))) {
            const uint32_t *jw = (const uint32_t *)job.cpu;
            fprintf(stderr,
-@@ -2577,9 +2652,72 @@ panvk_v9_draw(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_info *info)
+@@ -2579,9 +2654,72 @@ panvk_v9_draw(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_info *info)
                    (unsigned long long)cmdbuf->state.gfx.vs.push_uniforms,
                    vs->fau.total_count);
         }
@@ -367,7 +367,7 @@ index 37f0467..66c67a6 100644
 +         &precomp_ctx,
 +         panlib_1d_with_jm_deps(DIV_ROUND_UP(draw_count, 64), 0,
 +                                batch->vtc_jc.tiler_dep),
-+         PANLIB_BARRIER_NONE, info->indirect.buffer_dev_addr,
++         PANLIB_BARRIER_JM_SUPPRESS_PREFETCH, info->indirect.buffer_dev_addr,
 +         info->indirect.stride, draw_count, layer_count,
 +         info->index.buffer_dev_addr, index_size, jobs.gpu,
 +         pan_size(MALLOC_VERTEX_JOB),
@@ -399,7 +399,7 @@ index 37f0467..66c67a6 100644
     return VK_SUCCESS;
  }
  
-@@ -2653,9 +2791,6 @@ panvk_per_arch(CmdDrawIndirect)(VkCommandBuffer commandBuffer, VkBuffer _buffer,
+@@ -2655,9 +2793,6 @@ panvk_per_arch(CmdDrawIndirect)(VkCommandBuffer commandBuffer, VkBuffer _buffer,
     if (drawCount == 0)
        return;
  
@@ -409,7 +409,7 @@ index 37f0467..66c67a6 100644
     struct panvk_draw_info info = {
        .indirect.buffer_dev_addr =
           buffer ? panvk_buffer_gpu_ptr(buffer, offset) : 0,
-@@ -2678,9 +2813,6 @@ panvk_per_arch(CmdDrawIndexedIndirect)(VkCommandBuffer commandBuffer,
+@@ -2680,9 +2815,6 @@ panvk_per_arch(CmdDrawIndexedIndirect)(VkCommandBuffer commandBuffer,
     if (drawCount == 0)
        return;
  
@@ -420,10 +420,10 @@ index 37f0467..66c67a6 100644
        .index = panvk_draw_info_index(cmdbuf, 0),
        .indirect.buffer_dev_addr =
 diff --git a/src/panfrost/vulkan/panvk_cmd_draw.h b/src/panfrost/vulkan/panvk_cmd_draw.h
-index 21e6cce..02530a1 100644
+index 47f3755..4d33a93 100644
 --- a/src/panfrost/vulkan/panvk_cmd_draw.h
 +++ b/src/panfrost/vulkan/panvk_cmd_draw.h
-@@ -235,7 +235,7 @@ struct panvk_cmd_graphics_state {
+@@ -236,7 +236,7 @@ struct panvk_cmd_graphics_state {
        unsigned count;
     } vb;
  
