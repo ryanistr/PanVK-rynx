@@ -8,6 +8,7 @@ shift 3
 NATIVEDIR=$(ls -d /data/app/*/com.faux.vktest-*/lib/arm64 2>/dev/null | head -1)
 DRIVERDIR=/data/data/com.faux.vktest/files/drivers/$DRIVERNAME
 OUT=/data/local/tmp/vk_$LABEL
+rm -rf "$OUT"
 mkdir -p "$OUT"
 if [ -n "$ENVSTR" ] && [ "$ENVSTR" != "-" ]; then
   export "${ENVSTR%%=*}=${ENVSTR#*=}"
@@ -16,6 +17,7 @@ if [ $# -eq 0 ]; then
   set -- $($NATIVEDIR/libvkvalidate.so --list | awk '{print $1}')
 fi
 for id in "$@"; do
+  rm -f "$OUT/$id.json" "$OUT/$id.log"
   $NATIVEDIR/libvkvalidate.so --check "$id" \
     --driver-dir "$DRIVERDIR/" --driver-lib libvulkan_panvk.so \
     --hook-dir "$NATIVEDIR/" --out "$OUT/$id.json" > "$OUT/$id.log" 2>&1
