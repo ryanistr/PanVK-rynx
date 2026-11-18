@@ -15,7 +15,7 @@ test -n "$TZST" || { echo "no bionic tzst in $ARTIFACT_DIR" >&2; exit 1; }
 tar --zstd -xf "$TZST" -C "$OUT_DIR/extract" usr/lib/libvulkan_panvk.so meta.json
 
 adb devices | grep -q "$DEVICE" || { echo "device $DEVICE not connected" >&2; exit 1; }
-NAT=$(adb -s "$DEVICE" shell 'ls -d /data/app/*/com.faux.vktest-*/lib/arm64 2>/dev/null | head -1' | tr -d '\r')
+NAT=$(adb -s "$DEVICE" shell 'su -c "ls -d /data/app/*/com.faux.vktest-*/lib/arm64 2>/dev/null | head -1"' | tr -d '\r')
 test -n "$NAT" || { echo "com.faux.vktest not installed" >&2; exit 1; }
 
 adb -s "$DEVICE" push "$OUT_DIR/extract/usr/lib/libvulkan_panvk.so" /data/local/tmp/panvk-ci.so >/dev/null

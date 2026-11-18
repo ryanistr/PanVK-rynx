@@ -53,16 +53,18 @@ jobs:
 
       - name: Run the device test suite
         run: |
+          set -o pipefail
           bash tools/test-on-device.sh artifact test-results | tee test-output.txt
 
       - name: Publish the result as a job summary
+        if: always()
         run: |
           set -euo pipefail
           {
             echo "## PanVK on-device test result"
             echo
             echo '```json'
-            cat test-results/summary.json
+            if [ -f test-results/summary.json ]; then cat test-results/summary.json; else echo '{"error":"test did not produce a summary"}'; fi
             echo '```'
             echo
             echo "Build run: ${{ steps.pick.outputs.run_id }}"
