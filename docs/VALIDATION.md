@@ -203,3 +203,19 @@ and produced `vktest-results` with `summary.json` / `verdicts.txt`.
 Remaining gaps (12 fails + 3 crashes) are unchanged and are the deep JM backend issues
 documented above: XFB/geometry/tessellation, firstInstance/IDVS, MRT write-mask, framebuffer
 barriers, scratch-per-dispatch memory, and texel-buffer type punning.
+
+### Final automated run with baseline comparison
+
+Run [44242977991](https://github.com/ryanistr/PanVK-rynx/actions/runs/44242977991) used the
+new `tests/baseline.json` and printed automatic better/worse deltas in the job summary:
+
+- `perf.occlusion_query_in_pass_cost`: **1.03 ms** now vs 20.43 ms previous build =
+  **19.83x speedup**; stock is 1.06 ms (now 3% faster than stock).
+- `perf.fb_local_barrier_overdraw`: 1.34 ms vs 1.44 ms previous, stock 1.66 ms (24% faster
+  than stock).
+- Verdicts: 73 pass / 12 fail / 12 unsupported / 0 warn, 3 crashes. Versus the previous
+  build: +2 pass, -1 fail, -1 warn. Versus stock: +19 pass, -10 fail, +3 crashes.
+
+The full loop is now automated: a patch push triggers both arm64/bionic build workflows, and
+each successful bionic build triggers `test-after-build.yml` on the X6739 self-hosted runner,
+which installs the artifact, runs all 100 checks, and publishes the comparison.
