@@ -1,0 +1,91 @@
+diff --git a/src/panfrost/vulkan/panvk_physical_device.c b/src/panfrost/vulkan/panvk_physical_device.c
+index 6d713cf..9d648cf 100644
+--- a/src/panfrost/vulkan/panvk_physical_device.c
++++ b/src/panfrost/vulkan/panvk_physical_device.c
+@@ -756,6 +756,32 @@ panvk_kbase_sync_set_pending(
+    mtx_unlock(&ks->mutex);
+ }
+ 
++#ifdef __ANDROID__
++#include <dlfcn.h>
++#include <linux/sync_file.h>
++#include <stdarg.h>
++static void
++panvk_diag_log(const char *fmt, ...)
++{
++   static int (*p_log)(int, const char *, const char *, ...) = NULL;
++   static bool init = false;
++   if (!init) {
++      init = true;
++      p_log = dlsym(RTLD_DEFAULT, "__android_log_print");
++   }
++   if (p_log) {
++      char buf[256];
++      va_list ap;
++      va_start(ap, fmt);
++      vsnprintf(buf, sizeof(buf), fmt, ap);
++      va_end(ap);
++      p_log(6, "PANVK_DIAG", "%s", buf);
++   }
++}
++#else
++static void panvk_diag_log(UNUSED const char *fmt, ...) {}
++#endif
++
+ static VkResult
+ kbase_cpu_sync_wait_one(struct vk_device *device, struct kbase_cpu_sync *ks,
+                         enum vk_sync_wait_flags wait_flags,
+@@ -776,6 +802,7 @@ kbase_cpu_sync_wait_one(struct vk_device *device, struct kbase_cpu_sync *ks,
+             mtx_unlock(&ks->mutex);
+             struct pollfd pfd = { .fd = poll_fd, .events = POLLIN };
+             int r = 0;
++            int64_t t_p0 = os_time_get_nano();
+             while (true) {
+                int timeout_ms = -1;
+                if (abs_timeout_ns == 0) {
+@@ -794,6 +821,9 @@ kbase_cpu_sync_wait_one(struct vk_device *device, struct kbase_cpu_sync *ks,
+                   continue;
+                break;
+             }
++            int64_t dt_p = (os_time_get_nano() - t_p0) / 1000000;
++            if (dt_p > 100)
++               panvk_diag_log("wait_one import_fd=%d poll took %lld ms (r=%d)", orig_fd, (long long)dt_p, r);
+             if (poll_fd != orig_fd)
+                close(poll_fd);
+             if (r == 0)
+@@ -828,7 +858,11 @@ kbase_cpu_sync_wait_one(struct vk_device *device, struct kbase_cpu_sync *ks,
+          ks->state = KBASE_CPU_SYNC_WAITING;
+          mtx_unlock(&ks->mutex);
+ 
++         int64_t t_w0 = os_time_get_nano();
+          VkResult result = wait(data, targets, abs_timeout_ns);
++         int64_t dt_w = (os_time_get_nano() - t_w0) / 1000000;
++         if (dt_w > 100)
++            panvk_diag_log("wait_one pending_wait took %lld ms (res=%d)", (long long)dt_w, (int)result);
+ 
+          mtx_lock(&ks->mutex);
+          if (result == VK_SUCCESS) {
+@@ -955,9 +989,20 @@ kbase_cpu_sync_import_sync_file(struct vk_device *device, struct vk_sync *sync,
+    struct kbase_cpu_sync *ks = container_of(sync, struct kbase_cpu_sync, sync);
+    if (sync_file >= 0) {
+       struct panvk_device *pdev = to_panvk_device(device);
+-      if (pdev->kmod.dev &&
+-          kbase_kmod_fence_validate(pdev->kmod.dev, sync_file))
+-         mesa_logd("kbase: imported fence fd failed validation");
++      int val_ret = pdev->kmod.dev ? kbase_kmod_fence_validate(pdev->kmod.dev, sync_file) : -1;
++#ifdef __ANDROID__
++      struct sync_file_info finfo = { 0 };
++      if (ioctl(sync_file, SYNC_IOC_FILE_INFO, &finfo) == 0 && finfo.status == 0) {
++         struct sync_fence_info f[4] = { 0 };
++         finfo.num_fences = 4;
++         finfo.sync_fence_info = (uint64_t)(uintptr_t)f;
++         if (ioctl(sync_file, SYNC_IOC_FILE_INFO, &finfo) == 0 && finfo.num_fences > 0) {
++            panvk_diag_log("import unsignaled fd=%d val=%d name=%s n=%u drv0=%s obj0=%s st0=%d",
++                           sync_file, val_ret, finfo.name, finfo.num_fences,
++                           f[0].driver_name, f[0].obj_name, f[0].status);
++         }
++      }
++#endif
+       int dup = fcntl(sync_file, F_DUPFD_CLOEXEC, 3);
+       if (dup >= 0) {
+          mtx_lock(&ks->mutex);
