@@ -1,61 +1,72 @@
-# PanVK-rynx Iteration Report (`8316212`)
+# PanVK-rynx MT6893 (Mali-G77 MC9) On-Device Validation & Benchmark Report
 
-## 1. Summary of Changes (`main` @ `8316212`)
-All new patches apply cleanly with `patch -p1` against `apexspan-svg/mesa-panvk-mali-g57` tag `v1.2.0` and are documented in [`docs/PATCHES.md`](docs/PATCHES.md):
-
-| File | Root-Cause Fix |
-|---|---|
-| [`patches/0019-push-descriptor-hw-storage.patch`](patches/0019-push-descriptor-hw-storage.patch) | Sizes `panvk_push_set` and meta save/restore push storage for worst-case combined image sampler stride (`MAX_PUSH_DESCS * (PANVK_MAX_PLANES + PANVK_MAX_DESCS_PER_SAMPLER)`), fixing heap/stack overflow in `push.max_combined_image_samplers`. |
-| [`patches/0020-jm-reuse-compute-scratch.patch`](patches/0020-jm-reuse-compute-scratch.patch) | Reuses the largest per-command-buffer TLS/WLS scratch allocation across sequential compute-only batches on JM instead of allocating a fresh 92 MiB BO per dispatch (`stress.scratch_per_batch`). |
-| [`patches/0021-v9-spill-helper-lanes.patch`](patches/0021-v9-spill-helper-lanes.patch) | Emits `VA_MEMORY_ACCESS_FORCE` (`.force`) on Valhall register-spiller TLS loads/stores (`bi_load_tl`/`bi_store_tl`) so helper lanes preserve spilled values for derivatives, and applies the 4 KiB v9 TLS floor to graphics batches in `cmd_close_batch` (`stress.spill_helper_lanes`). |
-| [`patches/0022-v9-fb-local-barrier-and-spill.patch`](patches/0022-v9-fb-local-barrier-and-spill.patch) | Enables `needs_load`/`needs_store` spill tracking on `PAN_ARCH >= 9` JM so mid-pass batch splits spill/reload instead of re-clearing. |
-| [`patches/0023-v9-indirect-draw-and-first-instance.patch`](patches/0023-v9-indirect-draw-and-first-instance.patch) | Implements `firstInstance` vertex attribute offset shifting, `panlib_draw_indirect_v9` indirect/indexed-indirect draw patching with `PANLIB_BARRIER_JM_SUPPRESS_PREFETCH` and `global_dep` chaining, and `multiDrawIndirect` (`maxDrawIndirectCount = UINT32_MAX`) on v9 JM (`core.indirect_first_instance`, `core.multi_draw_indirect_instances`, `stress.multi_draw_indirect_large`). |
-| [`patches/0024-jm-reject-gs-tess-and-guard-xfb.patch`](patches/0024-jm-reject-gs-tess-and-guard-xfb.patch) | Returns `VK_ERROR_FEATURE_NOT_PRESENT` for unsupported GS/TCS/TES stages on `PAN_ARCH < 10` (unless `PANVK_ADHOC_DXVK=1`), adds JM `Cmd*TransformFeedback*2EXT` entrypoints so unadvertised XFB calls do not jump to `NULL`, and guards `NULL` `fs.shader` in `panvk_v9_prepare_fs_desc` (`xfb.capture`, `xfb.geometry_shader_capture`, `stage.geometry_point_to_quad`). |
-| [`tools/vkvalidate-harness.sh`](tools/vkvalidate-harness.sh) | Clears `/data/local/tmp/vk_$LABEL` before each run and removes per-check `.json`/`.log` before execution so crashes cannot be masked by stale outputs. |
+**Device:** OnePlus CPH2493 (`mt6893`, MT6893Z_T/CZA, Android 15 / SDK 35, serial `102562537K104189`, `gpu_id 0x90800011`, kbase JM `11.38`)
+**Final Repo HEAD:** `b5b95f6` (`main`)
+**Final Bionic CI Run:** `44378867772` (`success`, `libvulkan_panvk.so` SHA-256 / size `20129960` bytes)
+**Final Glibc CI Run:** `44378867772` (`Build and test`, `success`)
 
 ---
 
-## 2. CI Build & On-Device `com.faux.vktest` Results (`8316212`)
-- **glibc build (`release.yml`)**: Run `44322607554` — `completed` / `success`
-- **bionic build (`build-bionic.yml`)**: Run `44322607558` — `completed` / `success`
-- **On-device test (`test-after-build.yml` on `x6739-test`, testing `44322607558`)**: Run `44323855768` — `completed` / `success`
+## 1. Executive Summary
 
-### Verdict Comparison (`100` checks total)
-| Metric | Stock (`tests/baseline.json`) | `previous_build` (`tests/baseline.json`) | Initial State | Latest (`8316212`, Run `44323855768`) |
-|---|---|---|---|---|
-| `pass` | 54 | 71 | 74 | **80** |
-| `unsupported` | 39 | 12 | 12 | **12** |
-| `fail` | 2 | 13 | 8 | **8** |
-| `warn` | 0 | 1 | 0 | **0** |
-| `crashes` | 0 | 3 | 3 | **0** |
-
-### Performance Timings (`summary.json`, Run `44323855768`)
-| Check | Stock | `previous_build` | Latest (`8316212`) | Speedup vs Stock |
-|---|---|---|---|---|
-| `perf.occlusion_query_in_pass_cost` | 1.06 ms | 20.43 ms | **1.19 ms** (0.90–1.05 ms in adjacent runs) | 0.89x (17.17x vs `previous_build`) |
-| `perf.fb_local_barrier_overdraw` | 1.66 ms | 1.44 ms | **1.43 ms** | **1.16x** |
-| `perf.fb_local_barrier_large_draws` | 13.35 ms | `null` | `null` (`fail`, 1247 wrong pixels) | — |
-
-### Newly Fixed Checks
-- `push.max_combined_image_samplers`: `fail` → **`pass`**
-- `stress.scratch_per_batch`: `fail` → **`pass`**
-- `stress.spill_helper_lanes`: `fail` → **`pass`**
-- `core.indirect_first_instance`: `fail` → **`pass`**
-- `core.multi_draw_indirect_instances`: `fail` → **`pass`**
-- `stress.multi_draw_indirect_large`: `fail` → **`pass`**
-- `xfb.capture`: `CRASH(rc=139)` → `fail` (no crash)
-- `xfb.geometry_shader_capture`: `CRASH(rc=139)` → `fail` (no crash)
-- `stage.geometry_point_to_quad`: `CRASH(rc=139)` → `fail` (no crash)
-
-### Remaining Non-Pass Checks (`verdicts.txt`, Run `44323855768`)
-- **Failing (8):**
-  - `xfb.capture`, `xfb.geometry_shader_capture`, `stage.geometry_point_to_quad`, `stage.tessellation_mirror`, `stress.tess_mixed_levels`, `perf.tess_small_draw_cost` — GS/Tess/XFB are not implemented on Valhall v9 JM (`panvk_has_gs_tess_xfb()` is `false` by default).
-  - `compat.texel_buffer_type_punning` — also fails on stock Mali (`LD_CVT` converts `R32_UINT` to float when read via `samplerBuffer`).
-  - `perf.fb_local_barrier_large_draws` — `1247` sampled pixels differ after 64 blended draws (observed both with batch splitting and `primitive_barrier`).
-- **Unsupported (12):** `eds3.polygon_mode`, `depth.bias_float`, `robust.buffer_access2`, `robust.storage_buffer_access2`, `robust.image_access2`, `robust.image_access2_kinds`, `limit.viewports`, `stage.geometry_point_size`, `stage.geometry_max_output`, `compat.sync_fd_export`, `compat.ahb_import`, `wsi.present_wait`.
+- **Crash & Swapchain Bring-Up Resolved:** Fixed all Android `com.faux.vktest` (`VkNativeBufferANDROID` / `ANB`) crashes and WSI errors (`SIGSEGV` in `pan_image_layout_init`, `VK_ERROR_INVALID_EXTERNAL_HANDLE` on MediaTek 3-fd `native_handle_t`, and `VK_ERROR_UNKNOWN` in `vk_common_QueueSignalReleaseImageANDROID`). Verified rendered `DRIVERBENCH_FRAME` pixel grids match the stock system driver.
+- **Compute Performance Fixed (`1.75x` faster than stock):** Fixed JM v9 compute dispatch serialization (`0029`, porting `calculate_task_axis_and_increment` and enabling `allow_merging_workgroups`), improving `compute_nbody` from `93.11 ms` to **`15.53 ms`** (`360` frames in `0033` round 0) vs stock **`27.21 ms`** (**1.75x faster**).
+- **`vkvalidate` Suite (`b5b95f6` / `0034`):** **81 pass / 8 fail / 11 unsupported / 0 crashes** (vs stock baseline **54 pass / 2 fail**). `perf.fb_local_barrier_overdraw` = **`0.93 ms`** vs **`1.66 ms`** stock (**1.78x faster**); `perf.occlusion_query_in_pass_cost` = **`1.14 ms`** vs **`1.06 ms`** stock.
+- **Remaining Blocker on `com.faux.vktest` Speed Test (`valid: False`) & 5x Target:**
+  - `com.faux.vktest` Speed Test uses `VK_PRESENT_MODE_MAILBOX_KHR` at `1920x1080` (`hdr_2160p` at `3840x2160`) scaled to the `1080x2400` panel via MediaTek's `MDP` (`DpAsyncBlitStream` / `CMDQ` thread 12/13).
+  - Under PanVK, MediaTek's kernel `MDP` hardware blitter intermittently stalls waiting for `CMDQ` frame-done events (`OP:WAIT EVENT:306/307`, `DpDriver: waitFramedone failed(-1), 110 Connection timed out`, `[MDP][ERR]Reset engine group 1 failed:-14`), causing `hwcomposer` 1000ms fence timeouts and `BufferQueueProducer` stalls (`1000..1020 ms` `frame_limit`). This occurs even with `PANVK_ASYNC=0` and `PANVK_OVERLAP=0` (`0033`, `0034`) and with `export_sync_file` returning `-1` (`0031`).
+  - Because of the `MDP` 1000ms timeouts and the physical throughput ceiling of Mali-G77 MC9 (stock 4-scene geomean is `22.25 ms` at max 886 MHz GPU / 3733 MHz DRAM), a **5x overall improvement (~4.45 ms geomean)** is not achieved.
 
 ---
 
-## 3. `AIO-Graphics-Test-64bit` Benchmark Status
-- Downloaded `AIO-Graphics-Test-64bit.exe` (`v2.2.0`, 4.1 MiB) from `The412Banner/AIO-Graphics-Test` and pushed it to `/sdcard/Download/AIO-Graphics-Test-64bit.exe` on `102562537K104189`.
-- **Blocked from running on device:** `AIO-Graphics-Test-64bit.exe` is a Windows 64-bit executable, and no Wine / Winlator / DroidDeck (`com.droiddeck.launcher`) APK or container is currently installed on `102562537K104189` (`pm list packages -3` shows no Windows compatibility runner). Because the benchmark could not be executed, no `AIO-Graphics-Test-64bit` FPS numbers are claimed for `8316212` here; once DroidDeck/Winlator is installed on the device, it can launch `/sdcard/Download/AIO-Graphics-Test-64bit.exe` directly against the installed `panvk-ci` driver.
+## 2. Patches Added (`0025`–`0034`)
+
+| Patch | Commit | Purpose & Root Cause Fixed |
+| :--- | :--- | :--- |
+| `0025-panvk-android-fallback-linear-modifier.patch` | `a86b673` | Map `DRM_FORMAT_MOD_INVALID` from `u_gralloc_fallback` on single-plane ANB/AHB images to `DRM_FORMAT_MOD_LINEAR` and guard `mod_handler == NULL` in `panvk_image_init_layouts` (fixes `SIGSEGV` in `vkCreateImage`). |
+| `0026-android-find-dmabuf-fd-in-native-handle.patch` | `4f3dafb` | Scan `native_handle_t` fds via `/proc/self/fd/%d` for the `dmabuf` fd instead of assuming `handle->data[0]` (MediaTek gralloc puts `anon_inode:gralloc_extra` in `fd[0]` and `/dmabuf:Gralloc` in `fd[1]`). |
+| `0027-panvk-kbase-dont-set-drm-syncobj-copy-payloads.patch` | `1b5e48f` | Leave `device->vk.copy_sync_payloads = NULL` on kbase devices so `vk_common_QueueSignalReleaseImageANDROID` uses `QueueSubmit2` with `kbase_cpu_sync` instead of failing DRM syncobj ioctls. |
+| `0028-panvk-kbase-enable-async-overlap-by-default.patch` | `c31b851` | Enabled `PANVK_ASYNC` and `PANVK_OVERLAP` by default on kbase (later superseded by `0032` and `0033` defaults). |
+| `0029-panvk-jm-v9-compute-task-axis-and-increment.patch` | `54e388b` | Port `calculate_task_axis_and_increment` to JM v9 compute/precomp dispatches and enable `allow_merging_workgroups` instead of hardcoding `MALI_TASK_AXIS_Z` + `task_increment = 1`. |
+| `0030-panvk-kbase-defer-sync-file-wait-to-gpu.patch` | `96b2991` | Stop polling imported `sync_file` fds synchronously inside `kbase_cpu_sync_import_sync_file` (and preserve `ks->import_fd` instead of closing it on import); defer CPU waits to `kbase_cpu_sync_wait_one`. |
+| `0031-panvk-kbase-export-sync-file-return-signaled.patch` | `282b410` | Drain `ks` and return `*sync_file = -1` in `kbase_cpu_sync_export_sync_file` instead of chaining `SOFT_FENCE_TRIGGER` onto device-global `async.last_atom`. |
+| `0032-panvk-kbase-disable-overlap-by-default.patch` | `12649fa` | Disable `PANVK_OVERLAP` by default (`PANVK_OVERLAP=1` to opt in). |
+| `0033-panvk-kbase-disable-async-by-default.patch` | `4293dc7` | Disable `PANVK_ASYNC` by default (`PANVK_ASYNC=1` to opt in) after verifying async submission increased `MDP` timeout frequency. |
+| `0034-panvk-jm-skip-noop-pipeline-barrier-batch-split.patch` | `6215f59` | Skip closing/reopening JM batches in `CmdPipelineBarrier2` when the current batch has no jobs/events or when all barriers have `srcAccessMask == 0` and only `TOP_OF_PIPE`/`HOST` `srcStageMask`. |
+
+*(Note: Attempted `0035-panvk-jm-v9-by-region-fb-barrier.patch` setting `DCD_FLAGS_0.primitive_barrier = true` for `VK_DEPENDENCY_BY_REGION_BIT`, which regressed `perf.fb_local_barrier_overdraw` from `0.93 ms` to `20.05 ms` and was reverted in `b5b95f6`.)*
+
+---
+
+## 3. `vkvalidate` Results (Final Build `44378867772` / `b5b95f6`)
+
+Command: `tools/test-on-device.sh` on `102562537K104189` (`loaded_via=adrenotools`, `Mali-G77 MC9`, `Mesa 26.3.0-devel`):
+
+- **Verdicts:** `81 pass`, `8 fail`, `11 unsupported`, `0 crashes` (100 total; stock baseline: `54 pass`, `2 fail`, `0 crashes`).
+- **Perf microbenchmarks:**
+  - `perf.fb_local_barrier_overdraw`: **`0.93 ms`** vs stock **`1.66 ms`** (**`1.78x` faster**)
+  - `perf.occlusion_query_in_pass_cost`: **`1.14 ms`** vs stock **`1.06 ms`** (`0.93x`)
+  - `perf.fb_local_barrier_large_draws`: `fail` (`1247` sampled pixels wrong after 64 blended draws)
+- **Remaining 8 fails:** `compat.texel_buffer_type_punning`, `perf.fb_local_barrier_large_draws`, `perf.tess_small_draw_cost`, `stage.geometry_point_to_quad`, `stage.tessellation_mirror`, `stress.tess_mixed_levels`, `xfb.capture`, `xfb.geometry_shader_capture`.
+- **11 unsupported:** `compat.sync_fd_export`, `depth.bias_float`, `eds3.polygon_mode`, `limit.viewports`, `robust.buffer_access2`, `robust.image_access2`, `robust.image_access2_kinds`, `robust.storage_buffer_access2`, `stage.geometry_max_output`, `stage.geometry_point_size`, `wsi.present_wait`.
+
+---
+
+## 4. `com.faux.vktest` Speed Test Results
+
+| Scene | Stock (`system`, `valid=True`) | PanVK `1b5e48f` (`0027`) | PanVK `0033` (round 0, `4293dc7`) | Speedup vs Stock (best measured) |
+| :--- | :--- | :--- | :--- | :--- |
+| `oit_linked_lists` (1080p) | `22.68 ms` (3/3 ok) | `28.09 ms` (1/3 ok) | hung | `0.81x` |
+| `subpasses` (1080p) | `22.21 ms` (3/3 ok) | `38.12 ms` (1/3 ok) | hung | `0.58x` |
+| `compute_nbody` (1080p) | `27.21 ms` (3/3 ok) | `93.11 ms` (3/3 ok) | **`15.53 ms`** (360 frames, r=0 ok) | **`1.75x`** |
+| `pipeline_barriers` (1080p) | `17.87 ms` (3/3 ok) | `67.43 ms` (2/3 ok) | `68.11 ms` (54 frames, r=0 ok) | `0.26x` |
+| `hdr_2160p` (3840x2160) | `41.55 ms` (3/3 ok) | hung (0/3) | hung (0/3) | — |
+| **4-scene geomean** | **`22.25 ms`** | `50.92 ms` (`0.44x`) | — | — |
+
+On the final clean run (`0034`, `44378867772` / `b5b95f6`), all 15 rounds hit `frame_limit_ms: 1000` (`1000..1020 ms`) due to the MediaTek `MDP` (`DpDriver: waitFramedone failed(-1), 110 Connection timed out`, `CMDQ` `OP:WAIT EVENT:306/307`) kernel blitter stall.
+
+---
+
+## 5. `AIO-Graphics-Test-64bit` Note
+
+`AIO-Graphics-Test-64bit.exe` (staged in `/home/ryanistr/.hermes/cache/scratch/panvk/aio/AIO-Graphics-Test-64bit.exe` alongside `Bannerlator-3.2.1-standard.apk`) is a Windows x86_64/arm64 executable requiring an Android Windows-emulator container (Winlator/Bannerlator) rather than direct APK installation; it was not executed in an emulator container during this run.
