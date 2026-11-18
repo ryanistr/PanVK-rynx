@@ -1,0 +1,24 @@
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+index 80209e9..be25379 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -1654,6 +1654,19 @@ panvk_cmd_draw_indirect(struct panvk_cmd_buffer *cmdbuf,
+                vs, sysval_offset(graphics, vs.raw_vertex_offset));
+       }
+ 
++      if (getenv("PANVK_DEBUG_DRAW")) {
++         fprintf(stderr,
++                 "PANVKDBG INDIRECT fi_sysval=%llx fv_sysval=%llx "
++                 "push_uniforms=%llx first_vertex=%u inst_base=%u "
++                 "attrib0_stride=%u attrib1_stride=%u\n",
++                 (unsigned long long)first_instance_sysval,
++                 (unsigned long long)first_vertex_sysval,
++                 (unsigned long long)cmdbuf->state.gfx.vs.push_uniforms,
++                 draw->info.vertex.base, draw->info.instance.base,
++                 draw->indirect_info.attribs[0].stride,
++                 draw->indirect_info.attribs[1].stride);
++      }
++
+       enum panlib_barrier indirect_barrier =
+          PANLIB_BARRIER_JM_SUPPRESS_PREFETCH;
+       struct panlib_precomp_grid indirect_grid =
