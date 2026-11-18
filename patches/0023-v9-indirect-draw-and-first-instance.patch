@@ -2,10 +2,10 @@ Subject: 0023
 
 ---
  src/panfrost/libpan/draw_helper.cl            | 104 ++++++++++
- src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c    | 179 +++++++++++++++---
+ src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c    | 182 +++++++++++++++---
  src/panfrost/vulkan/panvk_cmd_draw.h          |   2 +-
  .../vulkan/panvk_vX_physical_device.c         |   2 +-
- 4 files changed, 260 insertions(+), 27 deletions(-)
+ 4 files changed, 263 insertions(+), 27 deletions(-)
 
 diff --git a/src/panfrost/libpan/draw_helper.cl b/src/panfrost/libpan/draw_helper.cl
 index a61aa32..6765c98 100644
@@ -120,7 +120,7 @@ index a61aa32..6765c98 100644
 +}
 +#endif
 diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
-index 37f0467..ffee705 100644
+index 37f0467..66c67a6 100644
 --- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
 +++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
 @@ -1823,6 +1823,8 @@ panvk_v9_emit_vs_attrib(const struct panvk_cmd_buffer *cmdbuf,
@@ -326,7 +326,7 @@ index 37f0467..ffee705 100644
         if (unlikely(getenv("PANVK_VERBOSE"))) {
            const uint32_t *jw = (const uint32_t *)job.cpu;
            fprintf(stderr,
-@@ -2577,9 +2652,69 @@ panvk_v9_draw(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_info *info)
+@@ -2577,9 +2652,72 @@ panvk_v9_draw(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_info *info)
                    (unsigned long long)cmdbuf->state.gfx.vs.push_uniforms,
                    vs->fau.total_count);
         }
@@ -364,7 +364,9 @@ index 37f0467..ffee705 100644
 +
 +      struct panvk_precomp_ctx precomp_ctx = panvk_per_arch(precomp_cs)(cmdbuf);
 +      panlib_draw_indirect_v9(
-+         &precomp_ctx, panlib_1d(DIV_ROUND_UP(draw_count, 64)),
++         &precomp_ctx,
++         panlib_1d_with_jm_deps(DIV_ROUND_UP(draw_count, 64), 0,
++                                batch->vtc_jc.tiler_dep),
 +         PANLIB_BARRIER_NONE, info->indirect.buffer_dev_addr,
 +         info->indirect.stride, draw_count, layer_count,
 +         info->index.buffer_dev_addr, index_size, jobs.gpu,
@@ -375,14 +377,15 @@ index 37f0467..ffee705 100644
 +         cmdbuf->state.gfx.vs.desc.driver_set.size, attribs_mask,
 +         attrib_strides_gpu);
 +      precomp_job_idx = batch->vtc_jc.job_index;
++      batch->vtc_jc.tiler_dep = 0;
 +   }
 +
 +   for (uint32_t d = 0; d < draw_count * layer_count; d++) {
 +      struct pan_ptr job =
 +         pan_ptr_offset(jobs, (size_t)d * pan_size(MALLOC_VERTEX_JOB));
 +      pan_jc_add_job(&batch->vtc_jc, MALI_JOB_TYPE_MALLOC_VERTEX,
-+                     is_indirect && d == 0, is_indirect,
-+                     d == 0 ? precomp_job_idx : 0, 0, &job, false);
++                     is_indirect && d == 0, is_indirect, 0,
++                     d == 0 ? precomp_job_idx : 0, &job, false);
 +      util_dynarray_append(&batch->jobs, job.cpu);
     }
  
@@ -396,7 +399,7 @@ index 37f0467..ffee705 100644
     return VK_SUCCESS;
  }
  
-@@ -2653,9 +2788,6 @@ panvk_per_arch(CmdDrawIndirect)(VkCommandBuffer commandBuffer, VkBuffer _buffer,
+@@ -2653,9 +2791,6 @@ panvk_per_arch(CmdDrawIndirect)(VkCommandBuffer commandBuffer, VkBuffer _buffer,
     if (drawCount == 0)
        return;
  
@@ -406,7 +409,7 @@ index 37f0467..ffee705 100644
     struct panvk_draw_info info = {
        .indirect.buffer_dev_addr =
           buffer ? panvk_buffer_gpu_ptr(buffer, offset) : 0,
-@@ -2678,9 +2810,6 @@ panvk_per_arch(CmdDrawIndexedIndirect)(VkCommandBuffer commandBuffer,
+@@ -2678,9 +2813,6 @@ panvk_per_arch(CmdDrawIndexedIndirect)(VkCommandBuffer commandBuffer,
     if (drawCount == 0)
        return;
  

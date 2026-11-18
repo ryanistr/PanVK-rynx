@@ -26,6 +26,7 @@ Patch bodies are kept byte-for-byte so they continue to apply to that tag.
 | `0021-v9-spill-helper-lanes.patch` | Emit `.force` (`VA_MEMORY_ACCESS_FORCE`) on Valhall register-spiller TLS loads/stores (`bi_load_tl`/`bi_store_tl`) so helper lanes preserve spilled values for derivatives, and apply the 4 KiB v9 TLS floor to graphics batches in `cmd_close_batch` (`stress.spill_helper_lanes`). |
 | `0022-v9-fb-local-barrier-and-spill.patch` | Enable `needs_load`/`needs_store` spill tracking on `PAN_ARCH >= 9` JM so mid-pass batch splits spill and reload the framebuffer instead of re-clearing it. |
 | `0023-v9-indirect-draw-and-first-instance.patch` | Implement `firstInstance` vertex attribute offset shifting, `panlib_draw_indirect_v9` indirect/indexed-indirect draw patching, and `multiDrawIndirect` (`maxDrawIndirectCount = UINT32_MAX`) on v9 JM (`core.indirect_first_instance`, `core.multi_draw_indirect_instances`, `stress.multi_draw_indirect_large`). |
+| `0024-jm-reject-gs-tess-and-guard-xfb.patch` | Return `VK_ERROR_FEATURE_NOT_PRESENT` for GS/TCS/TES shader stages on `PAN_ARCH < 10` (unless `PANVK_ADHOC_DXVK=1`) and provide JM `Cmd*TransformFeedback*2EXT` entrypoints so unadvertised XFB calls do not jump to NULL. |
 
 0001-0003 and 0009-0010 are specific to the G77 bring-up path. 0004-0008 are CSF fixes for
 the other Mali generations compiled into the same binary; they do not change arch-9 JM
