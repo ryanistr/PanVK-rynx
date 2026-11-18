@@ -1,5 +1,5 @@
 diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
-index 80209e9..ab42ed3 100644
+index 80209e9..a6fd344 100644
 --- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
 +++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
 @@ -610,6 +610,13 @@ panvk_draw_emit_attrib(const struct panvk_draw_data *draw,
@@ -9,9 +9,9 @@ index 80209e9..ab42ed3 100644
 +         if (getenv("PANVK_DEBUG_DRAW")) {
 +            fprintf(stderr,
 +                    "PANVKDBG ATTRIB inst_base=%u stride=%u offset=%u "
-+                    "per_inst=%d loc=%u\n",
++                    "per_inst=%d\n",
 +                    draw->info.instance.base, buf_info->stride, cfg.offset,
-+                    per_instance, attrib_info->location);
++                    per_instance);
 +         }
        }
     }
