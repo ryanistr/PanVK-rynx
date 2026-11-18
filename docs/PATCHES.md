@@ -38,6 +38,7 @@ Patch bodies are kept byte-for-byte so they continue to apply to that tag.
 | `0033-panvk-kbase-disable-async-by-default.patch` | Disable `PANVK_ASYNC` by default on kbase (`PANVK_ASYNC=1` to opt in) to isolate whether asynchronous job-bag pipelining triggers the MediaTek `MDP` (`CMDQ`) 1000ms timeout under `VK_PRESENT_MODE_MAILBOX_KHR`. |
 | `0034-panvk-jm-skip-noop-pipeline-barrier-batch-split.patch` | Avoid closing and reopening JM batches in `CmdPipelineBarrier2` when the current batch has no jobs/events or when all barriers in `pDependencyInfo` have `srcAccessMask == 0` and only `TOP_OF_PIPE`/`HOST` `srcStageMask`. |
 | `0035-u_gralloc-fallback-decode-mediatek-afbc-modifier.patch` | Decode MediaTek gralloc `private_handle_t` (`magic == 0x03141592`, `alloc_format` at `ints[30..31]`) into the exact `DRM_FORMAT_MOD_ARM_AFBC(...)` or `DRM_FORMAT_MOD_LINEAR` modifier in `u_gralloc_fallback`, fixing AFBC-as-linear display corruption and MDP timeouts. |
+| `0036-panvk-kbase-reenable-async-by-default.patch` | Re-enable `PANVK_ASYNC=1` by default on kbase (`PANVK_ASYNC=0` to disable) now that `0035` resolved the AFBC-as-linear MDP timeout. |
 
 0001-0003 and 0009-0010 are specific to the G77 bring-up path. 0004-0008 are CSF fixes for
 the other Mali generations compiled into the same binary; they do not change arch-9 JM
