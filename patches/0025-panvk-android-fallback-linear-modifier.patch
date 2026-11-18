@@ -1,0 +1,66 @@
+From 9f099649eabe9717c80fdd5e6b727db2ff1fcf2e Mon Sep 17 00:00:00 2001
+From: ryanistr <ridho.holy@gmail.com>
+Date: Wed, 18 Nov 2026 23:14:54 +0700
+Subject: [PATCH] panvk/android: fall back to DRM_FORMAT_MOD_LINEAR when
+ gralloc returns invalid modifier
+
+---
+ src/panfrost/vulkan/panvk_android.c | 13 +++++++++++++
+ src/panfrost/vulkan/panvk_image.c   |  3 +++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/src/panfrost/vulkan/panvk_android.c b/src/panfrost/vulkan/panvk_android.c
+index 82f9638..52e0e8d 100644
+--- a/src/panfrost/vulkan/panvk_android.c
++++ b/src/panfrost/vulkan/panvk_android.c
+@@ -5,6 +5,7 @@
+ 
+ #include "panvk_android.h"
+ 
++#include "drm-uapi/drm_fourcc.h"
+ #include "panvk_device.h"
+ #include "panvk_image.h"
+ 
+@@ -123,6 +124,13 @@ panvk_android_anb_init(struct panvk_device *dev, VkImageCreateInfo *create_info,
+    if (result != VK_SUCCESS)
+       return result;
+ 
++   /* Fallback u_gralloc returns DRM_FORMAT_MOD_INVALID with a linear stride. */
++   if (mod_info.drmFormatModifier == DRM_FORMAT_MOD_INVALID) {
++      if (mod_info.drmFormatModifierPlaneCount != 1)
++         return VK_ERROR_INVALID_EXTERNAL_HANDLE;
++      mod_info.drmFormatModifier = DRM_FORMAT_MOD_LINEAR;
++   }
++
+    mod_info.pNext = create_info->pNext;
+    const VkExternalMemoryImageCreateInfo external_info = {
+       .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
+@@ -232,6 +240,11 @@ panvk_android_ahb_image_init(struct AHardwareBuffer *ahb,
+       vk_android_get_ahb_layout(ahb, &mod_info, layouts, PANVK_MAX_PLANES);
+    if (result != VK_SUCCESS)
+       return result;
++   if (mod_info.drmFormatModifier == DRM_FORMAT_MOD_INVALID) {
++      if (mod_info.drmFormatModifierPlaneCount != 1)
++         return VK_ERROR_INVALID_EXTERNAL_HANDLE;
++      mod_info.drmFormatModifier = DRM_FORMAT_MOD_LINEAR;
++   }
+    __vk_append_struct(img->vk.android_deferred_create_info, &mod_info);
+ 
+    VkExternalMemoryImageCreateInfo external_info = {
+diff --git a/src/panfrost/vulkan/panvk_image.c b/src/panfrost/vulkan/panvk_image.c
+index 36a5a02..75028af 100644
+--- a/src/panfrost/vulkan/panvk_image.c
++++ b/src/panfrost/vulkan/panvk_image.c
+@@ -470,6 +470,9 @@ panvk_image_init_layouts(struct panvk_image *image,
+ 
+    const struct pan_mod_handler *mod_handler =
+       pan_mod_get_handler(arch, image->vk.drm_format_mod);
++   if (!mod_handler)
++      return panvk_error(image->vk.base.device,
++                         VK_ERROR_INITIALIZATION_FAILED);
+ 
+    /* initialize pan_image props and mod_handler */
+    if (panvk_image_use_yuv_tex(arch, image->vk.format)) {
+-- 
+2.56.1
+
