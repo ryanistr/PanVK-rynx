@@ -219,3 +219,28 @@ new `tests/baseline.json` and printed automatic better/worse deltas in the job s
 The full loop is now automated: a patch push triggers both arm64/bionic build workflows, and
 each successful bionic build triggers `test-after-build.yml` on the X6739 self-hosted runner,
 which installs the artifact, runs all 100 checks, and publishes the comparison.
+
+## 2026-11-18: zero crashes and 8 fails via feature gating + MRT fix
+
+| patch | effect measured in CI |
+|---|---|
+| `0016-gate-unimplemented-jm-features` | Stops advertising GS/tess/XFB on v9 JM. **Crashes 3 → 0**, fails 12 → 9, total verdicts 97 → 100. `PANVK_ADHOC_DXVK=1` restores the legacy DXVK advertisement. |
+| `0017-mrt-zero-write-mask` | No measurable verdict change. |
+| `0018-exclude-zero-write-mask-from-rt-mask` | `core.mrt_partial_kill` **fails → passes**; passes 73 → **74**, fails 9 → **8**. |
+| `0019-dispatch-batch-reuse` | Regressed: the 8 remaining checks all exited rc=139 (segfault) after reusing batches across dispatches. **Reverted** (`a64cb04`). |
+
+Best verified state (CI run [44249156938](https://github.com/ryanistr/PanVK-rynx/actions/runs/44249156938),
+bionic build [44247032970](https://github.com/ryanistr/PanVK-rynx/actions/runs/44247032970),
+glibc build [44247033019](https://github.com/ryanistr/PanVK-rynx/actions/runs/44247033019)):
+
+- **74 pass / 8 fail / 18 unsupported / 0 warn, 0 crashes**, 100/100 verdicts.
+- `perf.occlusion_query_in_pass_cost` 1.00 ms (stock 1.06), `perf.fb_local_barrier_overdraw`
+  1.22 ms (stock 1.66).
+- Remaining 8 fails: `push.max_combined_image_samplers`, three firstInstance/indirect checks,
+  `stress.scratch_per_batch`, `perf.fb_local_barrier_large_draws`, `stress.spill_helper_lanes`,
+  and `compat.texel_buffer_type_punning` (stock fails this one too).
+
+Versus the starting state (71 pass / 13 fail / 1 warn / 3 crashes, occlusion 20.43 ms), the
+driver now has **+3 passes, -5 fails, -1 warn, -3 crashes, and a ~20x faster occlusion path**.
+The remaining gaps need real JM implementations of indirect firstInstance handling, scratch
+reuse and framebuffer barriers, not batch-boundary tweaks.
