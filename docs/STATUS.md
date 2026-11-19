@@ -21,6 +21,10 @@ and evidence live in DroidDeck's
 
 ## Not working / open
 
+- **Full tile buffer (0014) faults real games.** Giving a v9 render pass the whole tile
+  buffer hard-stopped every JM atom in GTA V (`event=0x4`, `vkWaitForFences` = -4);
+  patch 0015 makes it opt-in (`PANVK_V9_FULL_TIB=1`) and restores half-size pipelined
+  tiles as the default. Evidence: `test-results/GameCrash-20261119-175724.txt`.
 - **Swapchain ping-pong.** The guest presents a three-slot ring that holds two contents and
   rotates; the guest then stops committing entirely, which shows as a frozen screen until
   input arrives. Two compositor-side mitigations were measured and reverted because they
