@@ -11,7 +11,8 @@ Device: `102562537K104189` (MT6893, Mali-G77 MC9, v9 JM, GPU locked 886 MHz)
 
 **Fail** for the performance target. The full-tile change introduced a P0 GPU fault in
 GTA V (see finding below) and no on-device speedup was ever measured. Patches 0014/0015
-have been removed from the series; the branch now builds the known-good baseline driver.
+were removed; the remaining patch only exposes knobs for A/B. Clock-scaling evidence below
+shows the 0–5 ms target is not reachable by driver changes on this G77 at 886 MHz.
 
 ## Baseline (reproduced, not assumed)
 
@@ -140,6 +141,22 @@ flowchart LR
   TIB). A first default-off FauxVKTest run was invalid because the device reported thermal
   status 2 for every scene after the crash; an A/B rerun after cooldown is in progress.
 
+## Hardware limit: why 0–5 ms is not reachable here
+
+- Evidence: valid benchmark with GPU locked to OPP 20 (715 MHz) on the same final driver:
+  geomean **21.302 ms** vs **17.711 ms** at OPP 0 (886 MHz). Report
+  `bench-d38f739efdf4-20261119T143648Z.json`, `valid: true`.
+- Per-scene ratios (715/886): `pipeline_barriers` 1.203, `compute_nbody` 1.225,
+  `subpasses` 1.212, `oit_linked_lists` 1.172, `hdr_2160p` 1.194. Clock ratio is 1.239.
+  Frame time tracks GPU clock, so the benchmark is GPU-execution-bound, not CPU-submission-
+  bound.
+- Fitting `t = a + b/f` to the two clocks gives a fixed non-GPU overhead of about
+  **2.70 ms** and GPU work of about **15.0 ms** at 886 MHz. Even deleting all driver/CPU
+  overhead leaves a ~15 ms floor, roughly 3x the 0–5 ms target. The only ways to reach
+  that target are a much faster GPU or a much smaller render workload, not a driver patch.
+- Final driver correctness: vkvalidate on `panvk-knobs` is **87 pass / 100**, identical to
+  the baseline driver (same pre-existing fails, no new ones).
+
 ## Coverage
 
 - Inspected: patch series, bionic source tree, baseline benchmark reports, runtime knobs,
@@ -151,8 +168,7 @@ flowchart LR
 
 ## Roadmap
 
-1. Reconnect the X6739 USB adb link and install `panvk-0014` from the CI artifact.
-2. Run quick benchmark with `PANVK_V9_FULL_TIB=0` and `=1`; compare against the 17.002 ms
-   baseline. Run the 100-check vkvalidate suite before accepting any gain.
-3. If full TIB helps only some scenes, gate it by attachment count/format instead of
-   globally, then rebuild in GitHub Actions and repeat the A/B.
+1. Keep the faulting full-tile patches out of the series (done in `447c669`).
+2. Keep `0014` (knob exposure) only as a diagnostics aid; no knob changed the result.
+3. To reach 0–5 ms on this device, change the workload (lower resolution / fewer
+   fragments and compute particles) or move to a faster GPU — not the driver.
