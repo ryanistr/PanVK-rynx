@@ -1,0 +1,41 @@
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+index 0893b42..24a1ded 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+@@ -547,20 +547,24 @@ panvk_per_arch(CmdPipelineBarrier2)(VkCommandBuffer commandBuffer,
+     * For in-tile barriers, we preserve the current batch and set primitive_barrier on the next draw.
+     */
+    bool is_fb_local = false;
+-   if (cmdbuf->cur_batch &&
+-       (pDependencyInfo->dependencyFlags & VK_DEPENDENCY_BY_REGION_BIT) &&
+-       pDependencyInfo->bufferMemoryBarrierCount == 0) {
+-      bool valid_image_barriers = true;
+-      for (uint32_t i = 0; i < pDependencyInfo->imageMemoryBarrierCount; i++) {
+-         const VkImageMemoryBarrier2 *img_barrier = &pDependencyInfo->pImageMemoryBarriers[i];
+-         if (img_barrier->oldLayout != img_barrier->newLayout ||
+-             img_barrier->srcQueueFamilyIndex != img_barrier->dstQueueFamilyIndex) {
+-            valid_image_barriers = false;
+-            break;
++   if (cmdbuf->cur_batch) {
++      bool by_region = (pDependencyInfo->dependencyFlags & VK_DEPENDENCY_BY_REGION_BIT) != 0;
++      bool inside_render_pass = cmdbuf->state.gfx.render.bound_attachments != 0;
++
++      if ((by_region || inside_render_pass) &&
++          pDependencyInfo->bufferMemoryBarrierCount == 0) {
++         bool valid_image_barriers = true;
++         for (uint32_t i = 0; i < pDependencyInfo->imageMemoryBarrierCount; i++) {
++            const VkImageMemoryBarrier2 *img_barrier = &pDependencyInfo->pImageMemoryBarriers[i];
++            if (img_barrier->oldLayout != img_barrier->newLayout ||
++                img_barrier->srcQueueFamilyIndex != img_barrier->dstQueueFamilyIndex) {
++               valid_image_barriers = false;
++               break;
++            }
+          }
++         if (valid_image_barriers)
++            is_fb_local = true;
+       }
+-      if (valid_image_barriers)
+-         is_fb_local = true;
+    }
+ 
+    if (cmdbuf->cur_batch && !is_fb_local) {
