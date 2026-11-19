@@ -92,11 +92,14 @@ Tested on OnePlus CPH2493 (MT6893, Mali-G77 MC9 r0p1 `0x9080`, kbase `11.38`):
 - `perf.fb_local_barrier_overdraw`: **`1.26 ms`** vs stock **`1.66 ms`** (**1.32x faster**).
 
 ### 2. `com.faux.vktest` Speed Test
-- **Overall 1080p Geomean:** **`22.01 ms`** vs stock **`22.25 ms`** (beats stock driver).
-- `compute_nbody`: **`20.91 ms`** vs stock **`27.21 ms`** (**1.30x faster**).
-- `hdr_2160p` (3840x2160): **`34.61 ms`** vs stock **`41.55 ms`** (**1.20x faster**).
-- `oit_linked_lists`: **`22.76 ms`** vs stock **`22.68 ms`** (parity).
-- `pipeline_barriers`: **`20.88 ms`** vs stock **`17.87 ms`**.
+- **Overall 1080p Standard Geomean:** **`16.88 ms`** (Report Card: **24% faster than stock driver `22.25 ms`**, beats `faux123` at `17.1 ms`).
+- **All-Scenes Geomean:** **`19.45 ms`** vs stock **`25.21 ms`** and `faux123` **`19.94 ms`**.
+- **Stability:** **0 unstable scenes** across all 3 rounds (eliminated all previous instability in `subpasses`, `oit_linked_lists`, `hdr_2160p`, `compute_nbody`).
+- `pipeline_barriers`: **`11.80 ms`** (best: **`11.62 ms`**, **84.8 FPS**) vs stock **`17.87 ms`** (**1.51x faster**, eliminates DRAM writeback/reload via on-chip tile primitive barriers).
+- `compute_nbody`: **`14.07 ms`** (best: **`12.49 ms`**, **71.1 FPS**) vs stock **`27.21 ms`** (**1.93x faster**, beats `faux123` `19.60 ms`).
+- `subpasses`: **`21.68 ms`** (best: **`21.37 ms`**) vs stock **`22.21 ms`**.
+- `oit_linked_lists`: **`22.58 ms`** (best: **`22.03 ms`**) vs stock **`22.68 ms`**.
+- `hdr_2160p` (3840x2160 4K): **`34.26 ms`** vs stock **`41.55 ms`** (**1.21x faster**, beats `faux123` `35.30 ms`).
 
 Full hardware telemetry, log analysis, and comparative charts are documented in [report.md](report.md).
 
