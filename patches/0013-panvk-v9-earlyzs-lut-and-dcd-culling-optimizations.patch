@@ -64,7 +64,7 @@ index 5c052d9..e09d172 100644
        cfg.flags_0.cull_front_face = !tess_nocull && polygon && (rs->cull_mode & VK_CULL_MODE_FRONT_BIT);
        cfg.flags_0.cull_back_face = !tess_nocull && polygon && (rs->cull_mode & VK_CULL_MODE_BACK_BIT);
        cfg.flags_0.front_face_ccw =
-@@ -4877,32 +4899,35 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+@@ -4877,49 +4899,52 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
        cfg.blend = blend_gpu;
        cfg.blend_count = MAX2(cmdbuf->state.gfx.render.fb.layout.rt_count, 1);
        if (fs) {
@@ -78,10 +78,50 @@ index 5c052d9..e09d172 100644
 -            (fs->info.fs.can_discard || fs->info.fs.writes_depth ||
 -             fs->info.fs.writes_stencil || fs->info.fs.writes_coverage ||
 -             dyns->ms.alpha_to_coverage_enable);
--         if (panvk_skip_fs(fs->info.work_reg_count, fs->info.tls_size)) {
--            cfg.flags_0.cull_front_face = true;
--            cfg.flags_0.cull_back_face = true;
--         }
++         const bool db_on = fs->fs.depth_bounds &&
++                            dyns->ds.depth.bounds_test.enable &&
++                            (cmdbuf->state.gfx.render.bound_attachments &
++                             MESA_VK_RP_ATTACHMENT_DEPTH_BIT);
++         const bool writes_z =
++            (cmdbuf->state.gfx.render.bound_attachments &
++             MESA_VK_RP_ATTACHMENT_DEPTH_BIT) &&
++            dyns->ds.depth.test_enable && dyns->ds.depth.write_enable;
++         const bool writes_s =
++            (cmdbuf->state.gfx.render.bound_attachments &
++             MESA_VK_RP_ATTACHMENT_STENCIL_BIT) &&
++            dyns->ds.stencil.test_enable &&
++            ((dyns->ds.stencil.front.write_mask &&
++              (dyns->ds.stencil.front.op.fail != VK_STENCIL_OP_KEEP ||
++               dyns->ds.stencil.front.op.pass != VK_STENCIL_OP_KEEP ||
++               dyns->ds.stencil.front.op.depth_fail != VK_STENCIL_OP_KEEP)) ||
++             (dyns->ds.stencil.back.write_mask &&
++              (dyns->ds.stencil.back.op.fail != VK_STENCIL_OP_KEEP ||
++               dyns->ds.stencil.back.op.pass != VK_STENCIL_OP_KEEP ||
++               dyns->ds.stencil.back.op.depth_fail != VK_STENCIL_OP_KEEP)));
++         const bool writes_zs_or_oq =
++            writes_z || writes_s ||
++            cmdbuf->state.gfx.occlusion_query.mode !=
++               MALI_OCCLUSION_MODE_DISABLED;
++         enum pan_earlyzs_zs_tilebuf_read zs_read =
++            (z_attachment_read(fs, &dyns->ial) ||
++             s_attachment_read(fs, &dyns->ial) || db_on)
++               ? PAN_EARLYZS_ZS_TILEBUF_READ_NO_OPT
++               : PAN_EARLYZS_ZS_TILEBUF_NOT_READ;
++
++         struct pan_earlyzs_state earlyzs =
++            pan_earlyzs_get(fs->fs.earlyzs_lut, writes_zs_or_oq,
++                            dyns->ms.alpha_to_coverage_enable,
++                            v9_ds_test_always_passes(cmdbuf), zs_read);
++
++         if (db_on && fs->info.fs.early_fragment_tests && writes_zs_or_oq &&
++             !fs->info.fs.can_discard && !fs->fs.depth_bounds_app_mask &&
++             !dyns->ms.alpha_to_coverage_enable)
++            earlyzs.update = MALI_PIXEL_KILL_FORCE_LATE;
++
+          if (panvk_skip_fs(fs->info.work_reg_count, fs->info.tls_size)) {
+             cfg.flags_0.cull_front_face = true;
+             cfg.flags_0.cull_back_face = true;
+          }
 -         cfg.flags_0.pixel_kill_operation =
 -            late_zs ? MALI_PIXEL_KILL_FORCE_LATE : MALI_PIXEL_KILL_FORCE_EARLY;
 -         cfg.flags_0.zs_update_operation =
@@ -94,56 +134,23 @@ index 5c052d9..e09d172 100644
 -          * the FS. Not when the app FS discards, writes SampleMask or uses
 -          * alpha-to-coverage (those must not gate EFT ZS writes). Same
 -          * condition as the ds.enable sysval. */
-          const bool db_on = fs->fs.depth_bounds &&
-                             dyns->ds.depth.bounds_test.enable &&
-                             (cmdbuf->state.gfx.render.bound_attachments &
-                              MESA_VK_RP_ATTACHMENT_DEPTH_BIT);
+-         const bool db_on = fs->fs.depth_bounds &&
+-                            dyns->ds.depth.bounds_test.enable &&
+-                            (cmdbuf->state.gfx.render.bound_attachments &
+-                             MESA_VK_RP_ATTACHMENT_DEPTH_BIT);
 -         const bool writes_zs_or_oq =
 -            ((cmdbuf->state.gfx.render.bound_attachments &
-+         const bool writes_z =
-+            (cmdbuf->state.gfx.render.bound_attachments &
-              MESA_VK_RP_ATTACHMENT_DEPTH_BIT) &&
+-              MESA_VK_RP_ATTACHMENT_DEPTH_BIT) &&
 -             dyns->ds.depth.test_enable && dyns->ds.depth.write_enable) ||
 -            ((cmdbuf->state.gfx.render.bound_attachments &
-+            dyns->ds.depth.test_enable && dyns->ds.depth.write_enable;
-+         const bool writes_s =
-+            (cmdbuf->state.gfx.render.bound_attachments &
-              MESA_VK_RP_ATTACHMENT_STENCIL_BIT) &&
+-              MESA_VK_RP_ATTACHMENT_STENCIL_BIT) &&
 -             dyns->ds.stencil.test_enable) ||
-+            dyns->ds.stencil.test_enable &&
-+            ((dyns->ds.stencil.front.write_mask &&
-+              (dyns->ds.stencil.front.op.fail != VK_STENCIL_OP_KEEP ||
-+               dyns->ds.stencil.front.op.pass != VK_STENCIL_OP_KEEP ||
-+               dyns->ds.stencil.front.op.depth_fail != VK_STENCIL_OP_KEEP)) ||
-+             (dyns->ds.stencil.back.write_mask &&
-+              (dyns->ds.stencil.back.op.fail != VK_STENCIL_OP_KEEP ||
-+               dyns->ds.stencil.back.op.pass != VK_STENCIL_OP_KEEP ||
-+               dyns->ds.stencil.back.op.depth_fail != VK_STENCIL_OP_KEEP)));
-+         const bool writes_zs_or_oq =
-+            writes_z || writes_s ||
-             cmdbuf->state.gfx.occlusion_query.mode !=
-                MALI_OCCLUSION_MODE_DISABLED;
-+         enum pan_earlyzs_zs_tilebuf_read zs_read =
-+            (z_attachment_read(fs, &dyns->ial) ||
-+             s_attachment_read(fs, &dyns->ial) || db_on)
-+               ? PAN_EARLYZS_ZS_TILEBUF_READ_NO_OPT
-+               : PAN_EARLYZS_ZS_TILEBUF_NOT_READ;
-+
-+         struct pan_earlyzs_state earlyzs =
-+            pan_earlyzs_get(fs->fs.earlyzs_lut, writes_zs_or_oq,
-+                            dyns->ms.alpha_to_coverage_enable,
-+                            v9_ds_test_always_passes(cmdbuf), zs_read);
-+
-          if (db_on && fs->info.fs.early_fragment_tests && writes_zs_or_oq &&
-              !fs->info.fs.can_discard && !fs->fs.depth_bounds_app_mask &&
-              !dyns->ms.alpha_to_coverage_enable)
+-            cmdbuf->state.gfx.occlusion_query.mode !=
+-               MALI_OCCLUSION_MODE_DISABLED;
+-         if (db_on && fs->info.fs.early_fragment_tests && writes_zs_or_oq &&
+-             !fs->info.fs.can_discard && !fs->fs.depth_bounds_app_mask &&
+-             !dyns->ms.alpha_to_coverage_enable)
 -            cfg.flags_0.zs_update_operation = MALI_PIXEL_KILL_FORCE_LATE;
-+            earlyzs.update = MALI_PIXEL_KILL_FORCE_LATE;
-+
-+         if (panvk_skip_fs(fs->info.work_reg_count, fs->info.tls_size)) {
-+            cfg.flags_0.cull_front_face = true;
-+            cfg.flags_0.cull_back_face = true;
-+         }
 +         cfg.flags_0.pixel_kill_operation = (enum mali_pixel_kill)earlyzs.kill;
 +         cfg.flags_0.zs_update_operation = (enum mali_pixel_kill)earlyzs.update;
           /* Per-sample shading (sampleShadingEnable, gl_SampleID and friends),
