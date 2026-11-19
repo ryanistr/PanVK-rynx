@@ -187,7 +187,8 @@ A broader pass looked for any driver-side lever that could change the ~15 ms GPU
   baseline **17.598 ms**, `tex.waterfall=all` **17.446 ms** (−0.9%, noise),
   `tex.waterfall=0` **17.546 ms** (noise). The properties are now confirmed read (scene
   means shift slightly), but no knob produces a meaningful gain. Remaining knobs
-  (`v9.jm.merge.wg=0`, `overlap=0`) are still running.
+  `v9.jm.merge.wg=0` **17.640 ms** and `overlap=0` **18.026 ms** were thermally invalidated
+  (status 2) and are not used. No knob delivers a repeatable, meaningful gain.
 - **Driver-side levers already applied in the tree**: intra-pass barrier elision (0010,
   0012), Early-ZS LUT + polygon scissor + primitive reorder (0011, 0013), FP16 dual-rate
   and raster-order access (0011), async kbase fence export and dirty-only import sync
