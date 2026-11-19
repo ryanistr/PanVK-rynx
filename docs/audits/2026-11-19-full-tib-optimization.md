@@ -107,11 +107,16 @@ flowchart LR
 ## Build and artifact evidence
 
 - Local builds were stopped per updated `AGENTS.md`; all builds now run in GitHub Actions.
-- Branch: `perf/full-tib-0014`, commits `8d79119` and `4251dea`.
+- Branch: `perf/full-tib-0014`, commits `8d79119`, `4251dea`, `91f6733`, `00ea02f`, `26b37ff`.
 - Bionic CI run: `44505743694` — **success** in 8m22s, artifact
   `panvk-rynx-bionic` published.
 - Artifact SHA256 (tzst): `9c4e3023a993756532cd414b2c649368299367c7b33cb725a830a3ff80b6f0b7`
 - Extracted library SHA256: `28aaf270c8ee0f6657e9daa020990ccbfe67088adc94342032078c496d0b6cc9`
+- Fix CI run: `44533132933` — **success**, artifact SHA256
+  `0d6d86b2b69a68263ad0b88c5c5ba2d70d2aa46287f6de6e9de215659e38ba03`, library SHA256
+  `70c17740f2fad8ad540fc4296a51ab4d2dff732d5a994dd518ebb34100b58613` (default-off full
+  TIB). A first default-off FauxVKTest run was invalid because the device reported thermal
+  status 2 for every scene after the crash; an A/B rerun after cooldown is in progress.
 
 ## Coverage
 
