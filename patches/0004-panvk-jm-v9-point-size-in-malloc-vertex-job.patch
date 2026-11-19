@@ -1,0 +1,13 @@
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+index b9d56a2..ac5fb87 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -4800,6 +4800,8 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+ 
+    pan_section_pack(job.cpu, MALLOC_VERTEX_JOB, PRIMITIVE, cfg) {
+       cfg.draw_mode = v9_translate_prim(info->prim);
++      if (vs->info.vs.writes_point_size && info->prim == MESA_PRIM_POINTS)
++         cfg.point_size_array_format = MALI_POINT_SIZE_ARRAY_FORMAT_FP16;
+       cfg.allow_rotating_primitives = polygon;
+       cfg.primitive_restart = false;
+       cfg.low_depth_cull = cfg.high_depth_cull =

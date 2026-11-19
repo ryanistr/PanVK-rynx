@@ -1,0 +1,63 @@
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_dispatch.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_dispatch.c
+index d60f4f2..da66e49 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_dispatch.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_dispatch.c
+@@ -270,6 +270,46 @@ cmd_dispatch(struct panvk_cmd_buffer *cmdbuf, struct panvk_dispatch_info *info)
+    /* v9: no separate PARAMETERS/DRAW sections; COMPUTE_JOB has a single
+     * PAYLOAD combining workgroup dims and the shader environment. There is
+     * no job_task_split field on this arch. */
++   struct panvk_physical_device *phys_dev =
++      to_panvk_physical_device(cmdbuf->vk.base.device->physical);
++   const struct pan_kmod_dev_props *props = &phys_dev->kmod.dev->props;
++   unsigned task_axis = MALI_TASK_AXIS_X;
++   unsigned task_increment = 1;
++   if (indirect) {
++      task_increment =
++         CLAMP(pan_calc_workgroups_per_task(&cs->cs.local_size, props), 1u,
++               0x3fffu);
++   } else {
++      const unsigned wg_dim[3] = {wg_count.x, wg_count.y, wg_count.z};
++      const uint64_t total_wgs =
++         (uint64_t)wg_count.x * wg_count.y * wg_count.z;
++      if (total_wgs > 0) {
++         const unsigned max_thread_cnt =
++            pan_compute_max_thread_count(props, cs->info.work_reg_count);
++         const unsigned threads_per_wg = MAX2(
++            cs->cs.local_size.x * cs->cs.local_size.y * cs->cs.local_size.z,
++            1u);
++         const unsigned total_cores =
++            MAX2(util_bitcount64(phys_dev->compute_core_mask), 1u);
++         const unsigned wgs_per_core =
++            (unsigned)MIN2(DIV_ROUND_UP(total_wgs, total_cores), 0x3fffu);
++         const unsigned threads_per_task =
++            DIV_ROUND_UP(max_thread_cnt, MAX2(props->max_tasks_per_core, 1u));
++         unsigned wgs_per_task = threads_per_task / threads_per_wg;
++         wgs_per_task = CLAMP(wgs_per_task, 1u, wgs_per_core);
++
++         task_axis = MALI_TASK_AXIS_X;
++         task_increment = wgs_per_task;
++         for (unsigned i = 0; i < 2; i++) {
++            if (task_increment <= wg_dim[i])
++               break;
++            task_axis++;
++            task_increment /= MAX2(wg_dim[i], 1u);
++         }
++         task_increment = CLAMP(task_increment, 1u, 0x3fffu);
++      }
++   }
++
+    pan_section_pack(job.cpu, COMPUTE_JOB, PAYLOAD, cfg) {
+       cfg.workgroup_size_x = cs->cs.local_size.x;
+       cfg.workgroup_size_y = cs->cs.local_size.y;
+@@ -279,9 +319,8 @@ cmd_dispatch(struct panvk_cmd_buffer *cmdbuf, struct panvk_dispatch_info *info)
+       cfg.workgroup_count_z = wg_count.z;
+       cfg.allow_merging_workgroups =
+          PANVK_PERF(V9_JM_MERGE_WG) && cs->info.cs.allow_merging_workgroups;
+-      /* Same as panfrost (Valhall JM). */
+-      cfg.task_increment = 1;
+-      cfg.task_axis = MALI_TASK_AXIS_Z;
++      cfg.task_increment = task_increment;
++      cfg.task_axis = task_axis;
+       cfg.compute.resources = cs_desc_state->res_table;
+       cfg.compute.shader = panvk_priv_mem_dev_addr(cs->spd);
+       cfg.compute.thread_storage = tsd;
