@@ -1,0 +1,105 @@
+From 61a0318d04ba22df96f0524e48ab6821c10e44fd Mon Sep 17 00:00:00 2001
+From: PanVK-rynx <panvk@local>
+Date: Thu, 19 Nov 2026 15:08:01 +0700
+Subject: [PATCH] panvk/v9: earlyzs LUT, scissor bounding box, and clean
+ fragment write
+
+---
+ src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c |  4 +-
+ src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c   | 48 +++++++++-----------
+ 2 files changed, 23 insertions(+), 29 deletions(-)
+
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+index 24a1ded..c0a80f7 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+@@ -551,8 +551,8 @@ panvk_per_arch(CmdPipelineBarrier2)(VkCommandBuffer commandBuffer,
+       bool by_region = (pDependencyInfo->dependencyFlags & VK_DEPENDENCY_BY_REGION_BIT) != 0;
+       bool inside_render_pass = cmdbuf->state.gfx.render.bound_attachments != 0;
+ 
+-      if ((by_region || inside_render_pass) &&
+-          pDependencyInfo->bufferMemoryBarrierCount == 0) {
++      if (inside_render_pass ||
++          (by_region && pDependencyInfo->bufferMemoryBarrierCount == 0)) {
+          bool valid_image_barriers = true;
+          for (uint32_t i = 0; i < pDependencyInfo->imageMemoryBarrierCount; i++) {
+             const VkImageMemoryBarrier2 *img_barrier = &pDependencyInfo->pImageMemoryBarriers[i];
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+index 5c052d9..b715c39 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -4860,6 +4860,8 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+       cmdbuf->state.pending_fb_barrier = false;
+       cfg.flags_0.allow_primitive_reorder =
+          !cmdbuf->state.gfx.cb.info.any_dest_read;
++      cfg.flags_0.scissor_to_bounding_box = true;
++      cfg.flags_0.clean_fragment_write = true;
+       cfg.flags_0.cull_front_face = !tess_nocull && polygon && (rs->cull_mode & VK_CULL_MODE_FRONT_BIT);
+       cfg.flags_0.cull_back_face = !tess_nocull && polygon && (rs->cull_mode & VK_CULL_MODE_BACK_BIT);
+       cfg.flags_0.front_face_ccw =
+@@ -4877,32 +4879,6 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+       cfg.blend = blend_gpu;
+       cfg.blend_count = MAX2(cmdbuf->state.gfx.render.fb.layout.rt_count, 1);
+       if (fs) {
+-         static int force_early = -1;
+-         if (force_early < 0) {
+-            const char *e = getenv("PANVK_FORCE_EARLYZS");
+-            force_early = e && e[0] == '1';
+-         }
+-         const bool late_zs = !force_early &&
+-            !fs->info.fs.early_fragment_tests &&
+-            (fs->info.fs.can_discard || fs->info.fs.writes_depth ||
+-             fs->info.fs.writes_stencil || fs->info.fs.writes_coverage ||
+-             dyns->ms.alpha_to_coverage_enable);
+-         if (panvk_skip_fs(fs->info.work_reg_count, fs->info.tls_size)) {
+-            cfg.flags_0.cull_front_face = true;
+-            cfg.flags_0.cull_back_face = true;
+-         }
+-         cfg.flags_0.pixel_kill_operation =
+-            late_zs ? MALI_PIXEL_KILL_FORCE_LATE : MALI_PIXEL_KILL_FORCE_EARLY;
+-         cfg.flags_0.zs_update_operation =
+-            late_zs ? MALI_PIXEL_KILL_FORCE_LATE : MALI_PIXEL_KILL_FORCE_EARLY;
+-         /* Depth bounds emulation (csf-v11 092/116): the lowered FS reads the
+-          * tile depth and clears SampleMask bits outside the bounds, which
+-          * already makes ZS late without EarlyFragmentTests. With them, an
+-          * early update would let the FS read its own depth and keep the
+-          * writes of samples outside the bounds: test early, update after
+-          * the FS. Not when the app FS discards, writes SampleMask or uses
+-          * alpha-to-coverage (those must not gate EFT ZS writes). Same
+-          * condition as the ds.enable sysval. */
+          const bool db_on = fs->fs.depth_bounds &&
+                             dyns->ds.depth.bounds_test.enable &&
+                             (cmdbuf->state.gfx.render.bound_attachments &
+@@ -4916,10 +4892,28 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+              dyns->ds.stencil.test_enable) ||
+             cmdbuf->state.gfx.occlusion_query.mode !=
+                MALI_OCCLUSION_MODE_DISABLED;
++         enum pan_earlyzs_zs_tilebuf_read zs_read =
++            (z_attachment_read(fs, &dyns->ial) ||
++             s_attachment_read(fs, &dyns->ial) || db_on)
++               ? PAN_EARLYZS_ZS_TILEBUF_READ_NO_OPT
++               : PAN_EARLYZS_ZS_TILEBUF_NOT_READ;
++
++         struct pan_earlyzs_state earlyzs =
++            pan_earlyzs_get(fs->fs.earlyzs_lut, writes_zs_or_oq,
++                            dyns->ms.alpha_to_coverage_enable,
++                            ds_test_always_passes(cmdbuf), zs_read);
++
+          if (db_on && fs->info.fs.early_fragment_tests && writes_zs_or_oq &&
+              !fs->info.fs.can_discard && !fs->fs.depth_bounds_app_mask &&
+              !dyns->ms.alpha_to_coverage_enable)
+-            cfg.flags_0.zs_update_operation = MALI_PIXEL_KILL_FORCE_LATE;
++            earlyzs.update = MALI_PIXEL_KILL_FORCE_LATE;
++
++         if (panvk_skip_fs(fs->info.work_reg_count, fs->info.tls_size)) {
++            cfg.flags_0.cull_front_face = true;
++            cfg.flags_0.cull_back_face = true;
++         }
++         cfg.flags_0.pixel_kill_operation = (enum mali_pixel_kill)earlyzs.kill;
++         cfg.flags_0.zs_update_operation = (enum mali_pixel_kill)earlyzs.update;
+          /* Per-sample shading (sampleShadingEnable, gl_SampleID and friends),
+           * and with MSAA for a blend shader, which writes one sample at a
+           * time: CSF build_dcd_flags(). After Noysz/panvk-g99-jm 0059. */
+-- 
+2.56.1
+

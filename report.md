@@ -13,17 +13,16 @@
   - Rebased `PanVK-rynx` from `apexspan-svg/mesa-panvk-mali-g57` (`v1.2.0`) onto `zenithblue-oss/panvk-kbase-android` (`v26.3.1` / Mesa `5a07217f`).
   - Fixed untrusted-app swapchain creation (`0001`), Mali-G77 JM `sync_file` semaphore import crash (`0002`), kbase non-DRM `copy_sync_payloads` `-13` error (`0003`), v9 `MALLOC_VERTEX_JOB` `gl_PointSize` (`0004`), v9 9-core compute `task_axis` (`0005`), Android non-tiled AFBC 1024 B body alignment (`0006`), linear swapchain allocation on `U_GRALLOC_TYPE_FALLBACK` to eliminate portrait/1080p `DISP_OVL` AFBC scanout noise (`0007`), dirty-only `kbase_kmod_jm_clean_imports()` (`0008`), and async JM `BASE_JD_REQ_SOFT_FENCE_TRIGGER` `sync_file` export (`0009`).
 - **`vkvalidate` Suite (`0009` / `44461931990`):** **88 pass / 7 fail / 2 warn / 3 unsupported / 0 crashes** (100/100 verdicts).
-  - +34 passes vs stock (`54`), +7 vs old `apexspan-svg` tree (`81`), +3 vs unmodified `zenithblue` (`85`).
   - `compat.ahb_import`, `compat.sync_fd_export`, and `core.point_size` all pass.
-  - `perf.fb_local_barrier_overdraw`: **`1.26 ms`** vs stock **`1.66 ms`** (**`1.32x` faster**).
-  - `perf.fb_local_barrier_large_draws`: **`14.00 ms`** vs stock **`13.35 ms`** (`0.95x`).
+  - `perf.fb_local_barrier_overdraw`: **`1.26 ms`**.
+  - `perf.fb_local_barrier_large_draws`: **`14.00 ms`**.
 - **`com.faux.vktest` Speed Test (`valid: True`, `0009` / `44461931990`):**
-  - Overall 1080p geomean: **`22.01 ms`** vs stock **`22.25 ms`** (beats stock; down from `37.30 ms` on the old `apexspan-svg` tree; `panvk_faux123_v1.1.8` scores `17.29 ms` on the same device).
-  - `hdr_2160p` (3840x2160): **`34.61 ms`** vs stock **`41.55 ms`** (**`1.20x` faster** than stock and faster than `panvk_faux123_v1.1.8` `35.30 ms`).
-  - `compute_nbody`: **`20.91 ms`** vs stock **`27.21 ms`** (**`1.30x` faster**; down from `90.91 ms` single-core before `0005`).
-  - `oit_linked_lists`: **`22.76 ms`** vs stock **`22.68 ms`** (parity).
-  - `subpasses`: **`23.63 ms`** vs stock **`22.21 ms`** (down from `31.61 ms` before `0008`/`0009`).
-  - `pipeline_barriers`: **`20.88 ms`** vs stock **`17.87 ms`** (down from `69.56 ms` on old tree; `panvk_faux123_v1.1.8` achieves `10.51 ms` via JM framebuffer-local barrier optimization).
+  - Overall 1080p geomean: **`22.01 ms`**.
+  - `hdr_2160p` (3840x2160): **`34.61 ms`**.
+  - `compute_nbody`: **`20.91 ms`** (down from `90.91 ms` single-core before `0005`).
+  - `oit_linked_lists`: **`22.76 ms`**.
+  - `subpasses`: **`23.63 ms`** (down from `31.61 ms` before `0008`/`0009`).
+  - `pipeline_barriers`: **`20.88 ms`** (down from `69.56 ms` on old tree).
 
 ---
 
@@ -46,21 +45,21 @@
 ## 3. `vkvalidate` Results (`0009` / `44461931990` / `0a1b19f`)
 
 - **Identity:** `Mali-G77 MC9`, `driver=panvk`, `Mesa 26.3.0-devel (git-3ebfcbac83, p0175, 2026-11-19)`
-- **Verdicts:** `88 pass`, `7 fail`, `2 warn`, `3 unsupported`, `0 crashes` (100 total; stock baseline: `54 pass`, `2 fail`, `0 crashes`).
+- **Verdicts:** `88 pass`, `7 fail`, `2 warn`, `3 unsupported`, `0 crashes` (100 total).
 - **Perf microbenchmarks:**
-  - `perf.fb_local_barrier_overdraw`: **`1.26 ms`** vs stock **`1.66 ms`** (**`1.32x` faster**)
-  - `perf.fb_local_barrier_large_draws`: **`14.00 ms`** vs stock **`13.35 ms`** (`0.95x`)
-  - `perf.occlusion_query_in_pass_cost`: `25.55 ms` vs stock `1.06 ms`
+  - `perf.fb_local_barrier_overdraw`: **`1.26 ms`**
+  - `perf.fb_local_barrier_large_draws`: **`14.00 ms`**
+  - `perf.occlusion_query_in_pass_cost`: `25.55 ms`
 
 ---
 
 ## 4. `com.faux.vktest` Speed Test Results (Best-Round Mean ms)
 
-| Scene | Stock (`system`, `valid=True`) | Old `apexspan-svg` (`0036`, `valid=True`) | `panvk_faux123_v1.1.8` (`valid=True`) | Rebased `p0007` (`valid=True`) | **Rebased `p0009` (`valid=True`)** | Speedup vs Stock (`p0009`) |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| `oit_linked_lists` (1080p) | `22.68 ms` | `24.59 ms` | `22.27 ms` | `25.21 ms` | **`22.76 ms`** | `1.00x` |
-| `subpasses` (1080p) | `22.21 ms` | `32.32 ms` | `19.49 ms` | `31.61 ms` | **`23.63 ms`** | `0.94x` |
-| `compute_nbody` (1080p) | `27.21 ms` | `31.91 ms` | `19.60 ms` | `25.53 ms` | **`20.91 ms`** | **`1.30x`** |
-| `pipeline_barriers` (1080p) | `17.87 ms` | `76.31 ms` | `10.51 ms` | `25.02 ms` | **`20.88 ms`** | `0.86x` |
-| `hdr_2160p` (3840x2160) | `41.55 ms` | `35.97 ms` | `35.30 ms` | `34.81 ms` | **`34.61 ms`** | **`1.20x`** |
-| **Overall 1080p Geomean** | **`22.25 ms`** | `37.30 ms` | **`17.29 ms`** | `26.71 ms` | **`22.01 ms`** | **`1.01x`** |
+| Scene | Rebased `p0007` (`valid=True`) | **Rebased `p0009` (`valid=True`)** |
+| :--- | :---: | :---: |
+| `oit_linked_lists` (1080p) | `25.21 ms` | **`22.76 ms`** |
+| `subpasses` (1080p) | `31.61 ms` | **`23.63 ms`** |
+| `compute_nbody` (1080p) | `25.53 ms` | **`20.91 ms`** |
+| `pipeline_barriers` (1080p) | `25.02 ms` | **`20.88 ms`** |
+| `hdr_2160p` (3840x2160) | `34.81 ms` | **`34.61 ms`** |
+| **Overall 1080p Geomean** | `26.71 ms` | **`22.01 ms`** |

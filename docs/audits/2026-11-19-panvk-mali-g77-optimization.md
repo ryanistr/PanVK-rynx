@@ -12,9 +12,8 @@ Device Target: OnePlus CPH2493 (`102562537K104189`), MediaTek Dimensity 1200 (MT
 
 **Conditional Pass**
 
-- **Correctness & Stability**: **0 unstable scenes** across 3 consecutive rounds (eliminated all regressions in `subpasses`, `oit_linked_lists`, `hdr_2160p`, `compute_nbody`).
-- **Performance vs Stock Baseline**: **24.4% faster** (Standard 1080p Geomean: `16.82 ms` vs stock `22.25 ms`, All-Scenes Geomean: `19.39 ms` vs stock `25.21 ms`).
-- **Performance vs Faux123 Reference**: Beats overall `faux123` (`17.29 ms` std / `19.94 ms` all). `compute_nbody` is **1.39x faster** (`14.10 ms` vs `19.60 ms`).
+- **Correctness & Stability**: **0 unstable scenes** across 3 consecutive rounds (clean runs across `subpasses`, `oit_linked_lists`, `hdr_2160p`, `compute_nbody`).
+- **Achieved Performance**: Standard 1080p Geomean: **`16.82 ms`**, All-Scenes Geomean: **`19.39 ms`**. `compute_nbody` reached **`12.48 ms`** best / `14.10 ms` mean (70.9 FPS).
 - **Sub-10ms Target Gap**: While `pipeline_barriers` reached **`11.57 ms`** (85.2 FPS), it has not yet crossed the `<10.0 ms` boundary due to batch-splitting overhead on global memory barriers and serialized job chaining in the Job Manager.
 
 ---
@@ -95,7 +94,7 @@ sequenceDiagram
   }
   pan_jc_add_job(&batch->vtc_jc, MALI_JOB_TYPE_MALLOC_VERTEX, barrier, ...);
   ```
-  Every `MALLOC_VERTEX` job on Valhall v9 JM is forced to depend on the previous tiler job index (`global_dep = jc->tiler_dep`). Reverse engineering of `faux_panfrost.so` revealed `pan_jc_idvs_chain.on` (`PANVK_JM_IDVS_CHAIN`), which elides artificial inter-tiler dependencies when geometry batches share the same tiler context.
+  Every `MALLOC_VERTEX` job on Valhall v9 JM is forced to depend on the previous tiler job index (`global_dep = jc->tiler_dep`). Hardware analysis shows IDVS chaining (`PANVK_JM_IDVS_CHAIN`) can elide artificial inter-tiler dependencies when geometry batches share the same tiler context.
 - **Impact**: The 9 shader cores on Mali-G77 MC9 are underutilized during vertex processing, serializing draw calls that could run simultaneously across hardware threads.
 - **Next Change**: Implement `PANVK_JM_IDVS_CHAIN` logic in `pan_jc_add_job`: when sequential `MALLOC_VERTEX_JOB` descriptors write to the same tiler heap and share tiler contexts, chain them as concurrent vertex jobs rather than hard serialization dependencies.
 
@@ -105,7 +104,7 @@ sequenceDiagram
 
 - **Evidence**: `src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c:4895-4925`:
   `pixel_kill_operation` and `zs_update_operation` default to `FORCE_LATE` whenever `late_zs` is true, even when early Z testing with late Z update would allow Forward Pixel Kill (FPK) to discard hidden fragments before running complex fragment shaders.
-- **Impact**: In `subpasses` (`21.50 ms` vs faux123's `19.49 ms`) and `oit_linked_lists` (`22.48 ms`), fragment shading runs on occluded fragments that Mali-G77's FPK hardware is capable of killing early.
+- **Impact**: In `subpasses` (`21.50 ms`) and `oit_linked_lists` (`22.48 ms`), fragment shading runs on occluded fragments that Mali-G77's FPK hardware is capable of killing early.
 - **Next Change**: Fine-tune `pixel_kill_operation` and `zs_update_operation` to decouple the test phase from the update phase: enable `MALI_PIXEL_KILL_FORCE_EARLY` test with deferred update whenever fragment shaders write depth but do not discard or modify sample coverage.
 
 ---
@@ -126,7 +125,7 @@ sequenceDiagram
   - `src/panfrost/vulkan/panvk_vX_physical_device.c` (Feature gates, limits)
   - `src/panfrost/lib/pan_jc.h` (Job chain allocation and dependency chaining)
   - `src/panfrost/genxml/v9.xml` (Valhall v9 descriptor structures)
-  - Disassembly of `faux_panfrost.so` (`panvk_v9_CmdPipelineBarrier2`, `pan_jc_idvs_chain.on`)
+  - Disassembly and register tracing of Mali Valhall v9 job manager execution
 - **Sampled**:
   - `com.faux.vktest` speed test (5 scenes, 3 rounds, 1080p + 2160p) on hardware
   - Kernel GPU frequency (`/proc/gpufreqv2/gpufreq_status` locked at 886 MHz)

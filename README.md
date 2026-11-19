@@ -87,21 +87,21 @@ python3 -m pip install --break-system-packages -U 'meson>=1.4'
 Tested on OnePlus CPH2493 (MT6893, Mali-G77 MC9 r0p1 `0x9080`, kbase `11.38`):
 
 ### 1. `vkvalidate` Conformance & Microbenchmarks (100 Tests)
-- **Results:** **88 pass / 7 fail / 2 warn / 3 unsupported / 0 crashes** (+34 passes over stock Android driver).
+- **Results:** **88 pass / 7 fail / 2 warn / 3 unsupported / 0 crashes**.
 - `compat.ahb_import`, `compat.sync_fd_export`, and `core.point_size` pass.
-- `perf.fb_local_barrier_overdraw`: **`1.26 ms`** vs stock **`1.66 ms`** (**1.32x faster**).
+- `perf.fb_local_barrier_overdraw`: **`1.26 ms`**.
 
 ### 2. `com.faux.vktest` Speed Test
-- **Overall 1080p Standard Geomean:** **`16.88 ms`** (Report Card: **24% faster than stock driver `22.25 ms`**, beats `faux123` at `17.1 ms`).
-- **All-Scenes Geomean:** **`19.45 ms`** vs stock **`25.21 ms`** and `faux123` **`19.94 ms`**.
-- **Stability:** **0 unstable scenes** across all 3 rounds (eliminated all previous instability in `subpasses`, `oit_linked_lists`, `hdr_2160p`, `compute_nbody`).
-- `pipeline_barriers`: **`11.80 ms`** (best: **`11.62 ms`**, **84.8 FPS**) vs stock **`17.87 ms`** (**1.51x faster**, eliminates DRAM writeback/reload via on-chip tile primitive barriers).
-- `compute_nbody`: **`14.07 ms`** (best: **`12.49 ms`**, **71.1 FPS**) vs stock **`27.21 ms`** (**1.93x faster**, beats `faux123` `19.60 ms`).
-- `subpasses`: **`21.68 ms`** (best: **`21.37 ms`**) vs stock **`22.21 ms`**.
-- `oit_linked_lists`: **`22.58 ms`** (best: **`22.03 ms`**) vs stock **`22.68 ms`**.
-- `hdr_2160p` (3840x2160 4K): **`34.26 ms`** vs stock **`41.55 ms`** (**1.21x faster**, beats `faux123` `35.30 ms`).
+- **Overall 1080p Standard Geomean:** **`16.82 ms`**.
+- **All-Scenes Geomean:** **`19.39 ms`**.
+- **Stability:** **0 unstable scenes** across all 3 rounds.
+- `pipeline_barriers`: **`11.74 ms`** (best: **`11.57 ms`**, **85.2 FPS**; in-tile primitive barrier).
+- `compute_nbody`: **`14.10 ms`** (best: **`12.48 ms`**, **70.9 FPS**).
+- `subpasses`: **`21.50 ms`** (best: **`21.28 ms`**, **46.5 FPS**).
+- `oit_linked_lists`: **`22.48 ms`** (best: **`21.88 ms`**, **44.5 FPS**).
+- `hdr_2160p` (3840x2160 4K): **`34.28 ms`** (best: **`34.11 ms`**, **29.2 FPS**).
 
-Full hardware telemetry, log analysis, and comparative charts are documented in [report.md](report.md).
+Detailed telemetry, logs, and verification reports are documented in [report.md](report.md).
 
 ---
 
