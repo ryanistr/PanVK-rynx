@@ -181,6 +181,28 @@ The 2026-11-20 critique is correct and verified on-device:
 - The clock-scaling fit still describes *our* driver's current inefficiency; it does not
   establish a hardware bound.
 
+### REA decompilation + knob A/B findings (2026-11-20)
+
+- Tooling: REA CLI with Ghidra 12.1.4 (`GHIDRA_INSTALL_DIR=/opt/ghidra`), decompiling the
+  faux123 ELF `499e3eae…` (Ghidra loads it at +0x100000). Evidence files are under
+  `/tmp/opencode/panvk/rea*`. MCP's Ghidra provider rejects 12.1.4 (wants ≥12.2), so the
+  CLI path is used; Ghidra 12.2 was also extracted but the CLI matches 12.1.4.
+- `pan_jc_add_job` decompiled: `PANVK_JM_IDVS_CHAIN` conditionally skips
+  `global_dep = jc->tiler_dep` for job type 11. Disabling it on-device had no measurable
+  effect (7.068 ms vs 7.040 ms baseline).
+- `PANVK_LAB_NO_FRAGVTC=1` (disables its v2/v3 fragment/VTC overlap) had no effect
+  (7.081 ms). `PANVK_LAB_ATOM_NOGEN=1` had no effect. These are not the gain.
+- **`PANVK_UBO_PUSH=0` slows `pipeline_barriers` 7.040 → 9.025 ms (+28%)** — confirmed
+  contributor. `PANVK_UBO_RANGE_1M=1` adds nothing. The gain is a shader-compiler UBO→FAU
+  push optimization, not job scheduling.
+- faux123's README confirms: "a shader with many lights ran about six times slower ...
+  loaded every light's data up front, ran out of registers, and wrote the values to memory
+  and read them back for every pixel" — fixed by its UBO push work.
+- Our Mesa tree already contains `pan_nir_opt_push_ubo` and `bi_opt_push_ubo`, but the
+  Vulkan driver never sets `input.fau.pushable_ubos`, so the pass never runs and the
+  `pan_fau_foreach_reloc()` slots are never populated. faux123 sets the mask and emits the
+  UBO→FAU data with `emit_ubo_push_copy` from `prepare_push_uniforms`.
+
 ### What faux123 actually does (observed, on-device)
 
 - faux123's README (public repo `faux123/panvk-faux123-driver-rp4pro`) names three fixes
