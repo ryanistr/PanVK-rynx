@@ -6,8 +6,8 @@ Subject: [PATCH] panvk/v9: earlyzs LUT, scissor bounding box, and clean
 
 ---
  src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c |  4 +-
- src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c   | 48 +++++++++-----------
- 2 files changed, 23 insertions(+), 29 deletions(-)
+ src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c   | 69 +++++++++++---------
+ 2 files changed, 44 insertions(+), 29 deletions(-)
 
 diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
 index 24a1ded..c0a80f7 100644
@@ -28,7 +28,35 @@ diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm
 index 5c052d9..b715c39 100644
 --- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
 +++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
-@@ -4860,6 +4860,8 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+@@ -4752,6 +4752,27 @@ v9_inst_attr_info(struct panvk_cmd_buffer *cmdbuf, uint32_t *mask,
+    return true;
+ }
+ 
++static bool
++v9_ds_test_always_passes(const struct panvk_cmd_buffer *cmdbuf)
++{
++   const struct vk_depth_stencil_state *ds =
++      &cmdbuf->vk.dynamic_graphics_state.ds;
++
++   if (!(cmdbuf->state.gfx.render.bound_attachments &
++         MESA_VK_RP_ATTACHMENT_DEPTH_BIT))
++      return true;
++
++   if (ds->depth.test_enable && ds->depth.compare_op != VK_COMPARE_OP_ALWAYS)
++      return false;
++
++   if (ds->stencil.test_enable &&
++       (ds->stencil.front.op.compare != VK_COMPARE_OP_ALWAYS ||
++        ds->stencil.back.op.compare != VK_COMPARE_OP_ALWAYS))
++      return false;
++
++   return true;
++}
++
+ static VkResult
+ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+                           const struct panvk_draw_info *info,
+@@ -4860,6 +4881,8 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
        cmdbuf->state.pending_fb_barrier = false;
        cfg.flags_0.allow_primitive_reorder =
           !cmdbuf->state.gfx.cb.info.any_dest_read;
@@ -37,7 +65,7 @@ index 5c052d9..b715c39 100644
        cfg.flags_0.cull_front_face = !tess_nocull && polygon && (rs->cull_mode & VK_CULL_MODE_FRONT_BIT);
        cfg.flags_0.cull_back_face = !tess_nocull && polygon && (rs->cull_mode & VK_CULL_MODE_BACK_BIT);
        cfg.flags_0.front_face_ccw =
-@@ -4877,32 +4879,6 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+@@ -4877,32 +4900,6 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
        cfg.blend = blend_gpu;
        cfg.blend_count = MAX2(cmdbuf->state.gfx.render.fb.layout.rt_count, 1);
        if (fs) {
@@ -70,7 +98,7 @@ index 5c052d9..b715c39 100644
           const bool db_on = fs->fs.depth_bounds &&
                              dyns->ds.depth.bounds_test.enable &&
                              (cmdbuf->state.gfx.render.bound_attachments &
-@@ -4916,10 +4892,28 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+@@ -4916,10 +4913,28 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
               dyns->ds.stencil.test_enable) ||
              cmdbuf->state.gfx.occlusion_query.mode !=
                 MALI_OCCLUSION_MODE_DISABLED;
@@ -83,7 +111,7 @@ index 5c052d9..b715c39 100644
 +         struct pan_earlyzs_state earlyzs =
 +            pan_earlyzs_get(fs->fs.earlyzs_lut, writes_zs_or_oq,
 +                            dyns->ms.alpha_to_coverage_enable,
-+                            ds_test_always_passes(cmdbuf), zs_read);
++                            v9_ds_test_always_passes(cmdbuf), zs_read);
 +
           if (db_on && fs->info.fs.early_fragment_tests && writes_zs_or_oq &&
               !fs->info.fs.can_discard && !fs->fs.depth_bounds_app_mask &&
@@ -102,4 +130,3 @@ index 5c052d9..b715c39 100644
            * time: CSF build_dcd_flags(). After Noysz/panvk-g99-jm 0059. */
 -- 
 2.56.1
-
