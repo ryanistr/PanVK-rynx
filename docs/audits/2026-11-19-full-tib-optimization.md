@@ -203,7 +203,7 @@ The 2026-11-20 critique is correct and verified on-device:
   `pan_fau_foreach_reloc()` slots are never populated. faux123 sets the mask and emits the
   UBO→FAU data with `emit_ubo_push_copy` from `prepare_push_uniforms`.
 
-### UBO-push port attempt (2026-11-20, reverted)
+### UBO-push port attempts (2026-11-20, both reverted)
 
 - Implemented patch 0015 using the REA evidence: set `fau.pushable_ubos`, cache bound-buffer
   host pointers in `panvk_buffer`/`panvk_descriptor_set`, and fill FAU relocations in
@@ -213,10 +213,15 @@ The 2026-11-20 critique is correct and verified on-device:
   (`report bench-c9c776a1663c-20261119T204052Z.json`, `valid: false`). The FAU slots for
   blend/system UBOs (resource handle 1) need faux123's special sysval path; copying zeros
   from an unbound descriptor broke those shaders.
-- Patch 0015 was reverted in `30161e8`. The driver is back to the known-good baseline;
-  no functional/visual regressions remain. This is an honest negative result: the UBO-push
-  gain is real (2 ms) but cannot be ported correctly without the sysval-UBO handling from
-  faux123's closed patch series.
+- Second attempt mimicked the raw instruction stream: faux123's v9 `prepare_push_uniforms`
+  uses `str wzr` for UBO-push FAU slots, so patch 0015 was rewritten to zero-fill them
+  (CI `44625148837`, library `88d37a04…`). On-device this was **also invalid**: flat frames
+  plus an `oit_linked_lists` signal-6 crash; `pipeline_barriers` did reach 8.117 ms but the
+  other scenes were unusable.
+- Conclusion: the `str wzr` path is a failure/fallback, and the actual FAU data population
+  lives in faux123's closed compiler/C-shader patch set, not reconstructible from the
+  runtime binary alone. Patch 0015 reverted again in `2248f88`. The driver is back to the
+  known-good baseline with no visual regressions.
 
 ### What faux123 actually does (observed, on-device)
 
