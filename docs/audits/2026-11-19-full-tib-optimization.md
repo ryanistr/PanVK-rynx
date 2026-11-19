@@ -163,6 +163,47 @@ flowchart LR
 - Final driver correctness: vkvalidate on `panvk-knobs` is **87 pass / 100**, identical to
   the baseline driver (same pre-existing fails, no new ones).
 
+## Correction: the "hardware limit" verdict was wrong
+
+The 2026-11-20 critique is correct and verified on-device:
+
+- Report `bench-499e3eae32a2-20261119T104952Z.json` (`valid: true`, 3/3 rounds) shows a
+  **different driver**, `panvk_faux123_v1.1.8` (sha `499e3eae…`), at `pipeline_barriers`
+  **7.011 ms mean / 6.995 ms median**, `subpasses` 19.47 ms, `compute_nbody` 14.00 ms.
+- I reproduced it live: `bench-499e3eae32a2-20261119T174653Z.json` with the same binary
+  gives `pipeline_barriers` **7.040 ms**, `subpasses` 19.50 ms, `compute_nbody` 14.75 ms.
+  Our driver on the same device is 12.5 ms / 22.7 ms / 14.6 ms.
+- Therefore sub-10 ms and even sub-8 ms are attainable on this G77 MC9 at 886 MHz. The
+  earlier "15 ms immutable floor / hardware limit" conclusion is retracted. The gain is
+  isolated to render-pass/barrier scenes (pipeline_barriers −5.5 ms, subpasses −3.2 ms),
+  with no change on compute (14.7 vs 14.6) or fill (35.5 vs 35.7) — so it is a job/batch
+  scheduling optimization, not raw GPU throughput.
+- The clock-scaling fit still describes *our* driver's current inefficiency; it does not
+  establish a hardware bound.
+
+### What faux123 actually does (observed, on-device)
+
+- faux123's README (public repo `faux123/panvk-faux123-driver-rp4pro`) names three fixes
+  that match the scene-specific gain: "screen got no completion signal for a frame still
+  being drawn, so the GPU sat idle a tenth of the time"; "a scene that submits the same
+  commands every frame waited for the GPU between every two passes"; and "work of two
+  passes no longer ran side by side". It claims `pipeline_barriers` went 67 ms → 10.6 ms.
+- Enabling its `PANVK_LAB_FRAGVTC_V2`/`STATS` properties on device produced:
+  ```
+  FRAGVTC v2=1 v3=0 submits=600 vtc=622 overlap=596 off_other=26 marks war=596
+  FRAGVTC v2=1 v3=0 submits=600 vtc=600 overlap=600 off_other=0   marks war=600
+  ```
+  i.e. ~100% fragment/VTC job overlap via its "v2" scheduler. Our driver has no such
+  diagnostic or v2 path — it uses the older `PANVK_OVERLAP` conditions in
+  `panvk_vX_gpu_queue.c`.
+- faux123 also ships `PANVK_JM_IDVS_CHAIN` (conditionally removes `global_dep =
+  jc->tiler_dep` in `pan_jc_add_job`), `PANVK_JM_FBBAR_PRIM`, `PANVK_JM_NO_FBBAR`,
+  `PANVK_UBO_PUSH`, `PANVK_FORCE_EARLYZS` — all default-off knobs read via
+  `os_get_option`/`getenv` in the closed-source binary.
+- Its 49-patch series (`panvk-faux123 a101612bb957`, series `7a9fa7460afa`) is **not
+  published**: the public repos contain only the `.adpkg.zip` binary + README, and the
+  commit ids are not in any public GitHub/GitLab repo. Exact porting requires that source.
+
 ## Deep-dive: checking for a missed optimization spot
 
 A broader pass looked for any driver-side lever that could change the ~15 ms GPU-work term:
