@@ -29,7 +29,7 @@ index aad56a3..3ed80d8 100644
        simple_mtx_destroy(&kbase_dev->atoms_read_lock);
        simple_mtx_destroy(&kbase_dev->atoms_lock);
     }
-@@ -3944,6 +3950,46 @@ kbase_kmod_jm_clean_imports(struct pan_kmod_dev *dev)
+@@ -3944,6 +3950,48 @@ kbase_kmod_jm_clean_imports(struct pan_kmod_dev *dev)
     simple_mtx_unlock(&kd->nc_lock);
  }
  
@@ -46,8 +46,10 @@ index aad56a3..3ed80d8 100644
 +      if (!debug_get_bool_option("PANVK_JM_SYNC_FENCE", true)) {
 +         kd->fence_stream_fd = -1;
 +      } else {
-+         struct kbase_ioctl_stream_create sc = { .name = "panvk" };
-+         int sfd = ioctl(dev->fd, KBASE_IOCTL_STREAM_CREATE, &sc);
++         struct {
++            char name[32];
++         } sc = { .name = "panvk" };
++         int sfd = ioctl(dev->fd, _IOW(KBASE_IOCTL_TYPE, 24, sc), &sc);
 +         kd->fence_stream_fd = (sfd >= 0) ? sfd : -1;
 +         mesa_logi("kbase: JM sync_file fence export %s (stream_fd=%d)",
 +                   kd->fence_stream_fd >= 0 ? "enabled" : "unavailable",
