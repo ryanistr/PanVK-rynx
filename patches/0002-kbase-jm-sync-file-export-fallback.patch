@@ -1,0 +1,30 @@
+diff --git a/src/panfrost/vulkan/panvk_physical_device.c b/src/panfrost/vulkan/panvk_physical_device.c
+index 06c661e..11f7e21 100644
+--- a/src/panfrost/vulkan/panvk_physical_device.c
++++ b/src/panfrost/vulkan/panvk_physical_device.c
+@@ -1114,11 +1114,15 @@ kbase_cpu_sync_export_sync_file(struct vk_device *device,
+    }
+    mtx_unlock(&ks->mutex);
+ 
+-   if (count == UINT32_MAX) {
++   if (count == UINT32_MAX || pan_arch(dev->kmod.dev->props.gpu_id) < 10) {
+       result = kbase_cpu_sync_wait_one(device, ks, VK_SYNC_WAIT_COMPLETE,
+                                        UINT64_MAX);
+       if (result != VK_SUCCESS)
+          return result;
++      if (pan_arch(dev->kmod.dev->props.gpu_id) < 10) {
++         *sync_file = -1;
++         return VK_SUCCESS;
++      }
+       count = 0;
+    }
+ 
+@@ -1170,8 +1174,6 @@ get_device_sync_types_kbase(struct panvk_physical_device *device,
+    uint32_t sync_type_count = 0;
+ 
+    device->drm_syncobj_type = kbase_cpu_sync_type;
+-   if (pan_arch(device->kmod.dev->props.gpu_id) < 10)
+-      device->drm_syncobj_type.export_sync_file = NULL;
+ 
+    /* Binary CPU sync first (fences need a binary type with CPU_RESET),
+     * software timeline emulation second (timeline semaphores).  Submitted

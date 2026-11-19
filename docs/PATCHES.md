@@ -5,3 +5,4 @@
 | Patch | Purpose |
 | :--- | :--- |
 | `0001-mediatek-private-handle-afbc-and-dmabuf-fd.patch` | When vendor AIMapper loading fails in untrusted app namespaces (`[P0A-V19-FULLPLANE] mapper load failed`), decode MediaTek gralloc `private_handle_t` (`magic == 0x03141592`, `alloc_format` at `ints[30..31]`) into the exact `DRM_FORMAT_MOD_ARM_AFBC(...)` / `DRM_FORMAT_MOD_ARM_16X16_BLOCK_U_INTERLEAVED` / `DRM_FORMAT_MOD_LINEAR` modifier and scan `native_handle_t` fds via `/proc/self/fd/%d` for the `dmabuf` fd in both `u_gralloc_fallback.c` and `vk_android_import_anb_memory`. |
+| `0002-kbase-jm-sync-file-export-fallback.patch` | Keep `export_sync_file` registered on JM (`arch < 10`) kbase sync types and wait for GPU completion before returning `*sync_file = -1` (already signaled). Prevents `get_semaphore_sync_type()` from returning `NULL` and segfaulting in `vk_common_ImportSemaphoreFdKHR` / `vkAcquireImageANDROID` / `wsi.present_wait` on Mali-G77 (`arch 9`). |
