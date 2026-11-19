@@ -1,0 +1,1 @@
+{"check": "compat.sync_fd_export", "feature": "VK_KHR_external_semaphore_fd", "bit": "", "sabotage": false, "loaded_via": "adrenotools", "device_name": "Mali-G77 MC9", "extension_listed": false, "advertised": false, "verdict": "unsupported", "note": "VK_KHR_external_semaphore_fd not listed", "evidence": []}

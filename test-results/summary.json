@@ -1,0 +1,96 @@
+{
+  "verdicts": {
+    "pass": 81,
+    "unsupported": 11,
+    "fail": 8
+  },
+  "crashes": [],
+  "total_verdicts": 100,
+  "perf_ms": {
+    "perf.occlusion_query_in_pass_cost": 1.09,
+    "perf.fb_local_barrier_overdraw": 1.39,
+    "perf.fb_local_barrier_large_draws": null
+  },
+  "comparison": {
+    "stock": {
+      "verdicts": {
+        "pass": {
+          "now": 81,
+          "baseline": 54,
+          "delta": 27
+        },
+        "fail": {
+          "now": 8,
+          "baseline": 2,
+          "delta": 6
+        },
+        "warn": {
+          "now": 0,
+          "baseline": 0,
+          "delta": 0
+        }
+      },
+      "crashes": {
+        "now": 0,
+        "baseline": 0
+      },
+      "perf": {
+        "perf.occlusion_query_in_pass_cost": {
+          "now_ms": 1.09,
+          "baseline_ms": 1.06,
+          "speedup_x": 0.97
+        },
+        "perf.fb_local_barrier_overdraw": {
+          "now_ms": 1.39,
+          "baseline_ms": 1.66,
+          "speedup_x": 1.19
+        },
+        "perf.fb_local_barrier_large_draws": {
+          "now_ms": null,
+          "baseline_ms": 13.35,
+          "speedup_x": null
+        }
+      }
+    },
+    "previous_build": {
+      "verdicts": {
+        "pass": {
+          "now": 81,
+          "baseline": 71,
+          "delta": 10
+        },
+        "fail": {
+          "now": 8,
+          "baseline": 13,
+          "delta": -5
+        },
+        "warn": {
+          "now": 0,
+          "baseline": 1,
+          "delta": -1
+        }
+      },
+      "crashes": {
+        "now": 0,
+        "baseline": 3
+      },
+      "perf": {
+        "perf.occlusion_query_in_pass_cost": {
+          "now_ms": 1.09,
+          "baseline_ms": 20.43,
+          "speedup_x": 18.74
+        },
+        "perf.fb_local_barrier_overdraw": {
+          "now_ms": 1.39,
+          "baseline_ms": 1.44,
+          "speedup_x": 1.04
+        },
+        "perf.fb_local_barrier_large_draws": {
+          "now_ms": null,
+          "baseline_ms": null,
+          "speedup_x": null
+        }
+      }
+    }
+  }
+}

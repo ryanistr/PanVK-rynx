@@ -1,91 +1,62 @@
 #!/usr/bin/env bash
-# PanVK-rynx - bionic (Android/NDK) build of the G77 PanVK driver.
+# PanVK-rynx - bionic (Android/NDK) build of the universal PanVK kbase driver.
 #
-# The main build.sh produces the glibc ICD for DroidDeck. This script produces the
-# Android/bionic counterpart (AdrenoTools-style: libvulkan_panvk.so + meta.json) from the
-# exact same tag and patches, so both targets are validated against one source state.
-# It is intended for GitHub Actions on an x86_64 runner with the Android NDK available.
+# Rebased onto zenithblue-oss/panvk-kbase-android (v26.3.1 / build 122i, Mesa 5a07217f)
+# plus this repository's patches (MT6893 MediaTek gralloc AFBC + dmabuf fd fallback).
 set -euxo pipefail
 
-VERSION=${PANVK_RYNX_VERSION:-1.2.0}
-TAG=${PANVK_SOURCE_TAG:-v$VERSION}
-REPO=${PANVK_SOURCE_REPO:-https://github.com/apexspan-svg/mesa-panvk-mali-g57.git}
+VERSION=${PANVK_RYNX_VERSION:-26.3.1}
+ZB_REPO=${PANVK_ZB_REPO:-https://github.com/zenithblue-oss/panvk-kbase-android.git}
+ZB_COMMIT=${PANVK_ZB_COMMIT:-cf70e02b918e1864cbcd746a7fefa57b96c673ce}
+MESA_REPO=${PANVK_MESA_REPO:-https://gitlab.freedesktop.org/mesa/mesa.git}
+MESA_COMMIT=${PANVK_MESA_COMMIT:-5a07217f034b3e50d8c7c7794f97a2df1742613b}
+API=${ANDROID_API:-29}
 NDK_PATH=${ANDROID_NDK_ROOT:-/opt/android-ndk}
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 WORK=${GITHUB_WORKSPACE:-$PWD}
+ZB="$WORK/zenithblue-src"
 SRC="$WORK/mesa-bionic-src"
 HT="$WORK/host-tools"
 DEPS="$WORK/android-deps"
-X11="$WORK/android-x11-stub"
+X11="$WORK/android-x11-deps"
 BDIR="$WORK/build-bionic"
 NDKBIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
 
 test -d "$NDKBIN" || { echo "Android NDK not found at $NDK_PATH" >&2; exit 1; }
 
-# ---- source: same tag + same patches as build.sh -------------------------------
-rm -rf "$SRC"
-git clone -q --depth 1 --branch "$TAG" "$REPO" "$SRC"
+# ---- source: zenithblue-oss/panvk-kbase-android + pinned Mesa 5a07217f ---------
+rm -rf "$ZB" "$SRC"
+mkdir -p "$ZB" "$SRC"
+git -C "$ZB" init -q
+git -C "$ZB" remote add origin "$ZB_REPO"
+git -C "$ZB" fetch -q --depth 1 origin "$ZB_COMMIT"
+git -C "$ZB" checkout -q FETCH_HEAD
+
+git -C "$SRC" init -q
+git -C "$SRC" remote add origin "$MESA_REPO"
+git -C "$SRC" fetch -q --depth 1 origin "$MESA_COMMIT"
+git -C "$SRC" checkout -q FETCH_HEAD
+git -C "$SRC" config user.name "PanVK-rynx"
+git -C "$SRC" config user.email "panvk@local"
+
+sh "$ZB/scripts/prepare-rc5-tree.sh" --mesa "$SRC"
+
 cd "$SRC"
 for p in "$SCRIPT_DIR"/patches/*.patch; do
    [ -f "$p" ] && patch -p1 --no-backup-if-mismatch < "$p"
 done
 
-# ---- Android-stub build fixes (bionic only; do not touch the glibc tree) -------
-python3 - <<'PY'
-def rep(path, old, new):
-   s = open(path).read()
-   if new in s:
-      return
-   assert old in s, f"pattern missing in {path}"
-   open(path, 'w').write(s.replace(old, new, 1))
-
-# The Android stub and vk_android_native_buffer.h both typedef buffer_handle_t;
-# guard the definitions so they are compatible in either translation unit.
-rep('include/vulkan/vk_android_native_buffer.h',
-    'typedef void *buffer_handle_t;',
-    '#ifndef ANDROID_BUFFER_HANDLE_T_DEFINED\n#define ANDROID_BUFFER_HANDLE_T_DEFINED\ntypedef void *buffer_handle_t;\n#endif')
-rep('include/android_stub/cutils/native_handle.h',
-    'typedef const native_handle_t* buffer_handle_t;',
-    '#ifndef ANDROID_BUFFER_HANDLE_T_DEFINED\n#define ANDROID_BUFFER_HANDLE_T_DEFINED\ntypedef const native_handle_t* buffer_handle_t;\n#endif')
-
-# anb->handle is a void* with the portable stub; cast it before use.
-p = 'src/vulkan/runtime/vk_android.c'
-s = open(p).read()
-s = s.replace('assert(anb && anb->handle && anb->handle->numFds > 0);',
-              'assert(anb && anb->handle && ((const native_handle_t *)anb->handle)->numFds > 0);')
-s = s.replace('int dma_buf_fd = anb->handle->data[0];',
-              'int dma_buf_fd = ((const native_handle_t *)anb->handle)->data[0];')
-open(p, 'w').write(s)
-
-# vk_android.c already provides HAL_MODULE_INFO_SYM on Android; the extra bridge
-# would define it twice in the same shared library.
-rep('src/panfrost/vulkan/meson.build',
-    '  panvk_android_hal_bridge, panvk_entrypoints, panvk_tracepoints, panvk_drirc],',
-    '  panvk_entrypoints, panvk_tracepoints, panvk_drirc],')
-print('bionic source fixes applied')
-PY
-
-# ---- host codegen tools (x86_64 native, no WSI platforms needed) ---------------
+# ---- host codegen tools (x86_64 native) ----------------------------------------
 rm -rf "$HT"
-meson setup "$HT" "$SRC" \
-   -Dbuildtype=release -Dvulkan-drivers=panfrost -Dgallium-drivers= \
-   -Dplatforms= -Dpanfrost-kmds=kbase,panthor -Dpanvk-use-kbase=true \
-   -Dmesa-clc=enabled -Dprecomp-compiler=enabled \
-   -Degl=disabled -Dgles1=disabled -Dgles2=disabled -Dopengl=false \
-   -Dglx=disabled -Dgbm=disabled -Dlibunwind=disabled -Dzstd=disabled
-ninja -j"$(nproc)" -C "$HT" \
-   src/compiler/clc/mesa_clc src/compiler/spirv/vtn_bindgen2 \
-   src/panfrost/clc/panfrost_compile
-ln -sf ../src/compiler/clc/mesa_clc "$HT/bin/mesa_clc"
-ln -sf ../src/compiler/spirv/vtn_bindgen2 "$HT/bin/vtn_bindgen2"
-ln -sf ../src/panfrost/clc/panfrost_compile "$HT/bin/panfrost_compile"
+sh "$ZB/scripts/bootstrap-host-tools.sh" --mesa "$SRC" --out "$HT"
 
-# ---- Android sysroot bits: static libdrm + minimal pkg-config stubs ------------
+# ---- Android sysroot bits: static libdrm + header-only X11/XCB -----------------
 export PATH="$NDKBIN:$PATH"
-cat > "$WORK/android-aarch64.ini" <<'INI'
+CC_TRIPLE="aarch64-linux-android$API-clang"
+cat > "$WORK/android-aarch64.ini" <<INI
 [binaries]
-c = 'aarch64-linux-android35-clang'
-cpp = 'aarch64-linux-android35-clang++'
+c = '$CC_TRIPLE'
+cpp = '${CC_TRIPLE}++'
 ar = 'llvm-ar'
 strip = 'llvm-strip'
 pkg-config = 'pkg-config'
@@ -96,7 +67,8 @@ cpu_family = 'aarch64'
 cpu = 'aarch64'
 endian = 'little'
 INI
-rm -rf "$DEPS"
+
+rm -rf "$DEPS" "$WORK/libdrm-src" "$WORK/libdrm-build"
 git clone -q --depth 1 -b libdrm-2.4.125 https://gitlab.freedesktop.org/mesa/drm.git "$WORK/libdrm-src"
 meson setup "$WORK/libdrm-build" "$WORK/libdrm-src" \
    --cross-file "$WORK/android-aarch64.ini" --prefix="$DEPS" --libdir=lib \
@@ -106,7 +78,7 @@ meson setup "$WORK/libdrm-build" "$WORK/libdrm-src" \
    -Dtegra=disabled -Dvc4=disabled -Detnaviv=disabled -Dcairo-tests=disabled \
    -Dman-pages=disabled -Dvalgrind=disabled -Dtests=false -Dudev=false
 ninja -C "$WORK/libdrm-build" install
-mkdir -p "$DEPS/lib/pkgconfig" "$X11/lib/pkgconfig"
+mkdir -p "$DEPS/lib/pkgconfig"
 cat > "$DEPS/lib/pkgconfig/zlib.pc" <<'PC'
 Name: zlib
 Description: zlib from the NDK sysroot
@@ -114,19 +86,14 @@ Version: 1.3
 Libs: -lz
 Cflags:
 PC
-cat > "$X11/lib/pkgconfig/xcb.pc" <<'PC'
-Name: xcb
-Description: stub
-Version: 0
-Libs:
-Cflags:
-PC
+
+sh "$ZB/scripts/prepare-x11-headers.sh" "$X11"
 
 # ---- cross-build the bionic driver ---------------------------------------------
 cat > "$WORK/bionic.cross.ini" <<INI
 [binaries]
-c = 'aarch64-linux-android35-clang'
-cpp = 'aarch64-linux-android35-clang++'
+c = '$CC_TRIPLE'
+cpp = '${CC_TRIPLE}++'
 ar = 'llvm-ar'
 strip = 'llvm-strip'
 pkg-config = 'pkg-config'
@@ -140,15 +107,15 @@ endian = 'little'
 [properties]
 pkg_config_libdir = ['$DEPS/lib/pkgconfig', '$X11/lib/pkgconfig']
 INI
+
 export PATH="$HT/bin:$NDKBIN:$PATH"
 rm -rf "$BDIR"
 meson setup "$BDIR" "$SRC" --cross-file "$WORK/bionic.cross.ini" \
-   -Dbuildtype=release -Dplatforms=android -Dandroid-stub=true -Dandroid-strict=false \
-   -Dgallium-drivers= -Dvulkan-drivers=panfrost \
-   -Dpanfrost-kmds=kbase,panthor -Dpanvk-use-kbase=true \
-   -Dmesa-clc=system -Dprecomp-compiler=system \
-   -Dxlib-lease=disabled -Degl=disabled -Dgles1=disabled -Dgles2=disabled \
-   -Dopengl=false -Dglx=disabled -Dgbm=disabled -Dlibunwind=disabled -Dzstd=disabled \
+   -Dbuildtype=release -Dplatforms=android,x11 -Dandroid-stub=true -Dandroid-strict=false \
+   -Dgallium-drivers= -Dvulkan-drivers=panfrost -Dpanfrost-kmds=kbase \
+   -Dmesa-clc=system -Dprecomp-compiler=system -Dxlib-lease=disabled \
+   -Degl=disabled -Dgles1=disabled -Dgles2=disabled -Dopengl=false \
+   -Dglx=disabled -Dgbm=disabled -Dlibunwind=disabled -Dzstd=disabled \
    -Dcpp_link_args=-static-libstdc++
 ninja -j"$(nproc)" -C "$BDIR" src/panfrost/vulkan/libvulkan_panfrost.so
 
@@ -156,7 +123,11 @@ SO="$BDIR/src/panfrost/vulkan/libvulkan_panfrost.so"
 test -f "$SO"
 readelf -sW "$SO" | grep -q panvk_v9_
 readelf -sW "$SO" | grep -q panvk_v11_
-strings -a "$SO" | grep -q PANVK_FD_INTEROP
+if readelf -dW "$SO" | grep -qiE 'libLLVM|libclc|libLLVMSPIRV|libSPIRV'; then
+   echo "driver links LLVM/SPIRV, which it must not" >&2
+   readelf -dW "$SO" | grep -iE 'NEEDED' >&2
+   exit 1
+fi
 
 # ---- package: AdrenoTools-style driver directory --------------------------------
 OUT="$WORK/out-bionic"
@@ -179,10 +150,10 @@ cat > "$OUT/meta.json" <<META
    "schemaVersion": 1,
    "kind": "android-vulkan-driver",
    "name": "PanVK-rynx-$VERSION-bionic",
-   "description": "PanVK-rynx $VERSION (Android/bionic): Mali-G77 v9 JM and v10/v11 CSF on the source tree's own kbase backend. Built from $REPO with this repository's patches.",
+   "description": "PanVK-rynx $VERSION (Android/bionic): universal Mali v6-v14 PanVK on kbase, rebased on zenithblue-oss/panvk-kbase-android ($ZB_COMMIT) + MT6893 MediaTek gralloc patches.",
    "author": "PanVK-rynx",
    "driverVersion": "$VERSION-bionic",
-   "minApi": 29,
+   "minApi": $API,
    "libraryName": "libvulkan_panvk.so",
    "gpuArch": [9, 10, 11],
    "importedAt": 0

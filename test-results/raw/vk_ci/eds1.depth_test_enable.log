@@ -1,0 +1,20 @@
+PANVKDBG kbase uAPI: JM 11.38\nPANVKDBG kbase MEM_EXEC_INIT ok (shaders -> exec)
+PANVKDBG kbase props: js_present=0x7 jsf=20e,1c9e,1e num_cg=1 cg0=0x660067 tiler_features=0x809 shader_present=0x660067
+WARNING: panvk is not a conformant Vulkan implementation, testing use only.
+MESA: warning: Gralloc doesn't support lock_ycbcr (video buffers won't be supported)
+MESA: info: Using fallback gralloc implementation
+Failed to create //.cache for shader cache (Read-only file system)---disabling.
+PANVKDBG WSI: uses_kbase=1 termux_raw=0 raw_dri3=0 kbase_dmabuf=0 sw_device=1 raw_fd_modifier=0
+PANVKDBG WSI host-import diagnostic enabled
+PANVKDBG CREATE_DEVICE BEFORE_INIT enabledExtensionCount=1\nPANVKDBG CREATE_DEVICE EXT[0]=VK_EXT_extended_dynamic_state\nPANVKDBG CREATE_DEVICE AFTER_INIT result=0 KHR_swapchain=0\nPANVKDBG kbase uAPI: JM 11.38\nPANVKDBG kbase MEM_EXEC_INIT ok (shaders -> exec)
+PANVKDBG kbase props: js_present=0x7 jsf=20e,1c9e,1e num_cg=1 cg0=0x660067 tiler_features=0x809 shader_present=0x660067
+PANVKDBG NATIVEBO REGISTER gpu=0000007365a00000 cpu=0x7365a00000 size=134217728 count=1
+PANVKDBG NATIVEBO REGISTER gpu=000000735d000000 cpu=0x735d000000 size=144003072 count=2
+PANVKDBG panvk_queue_create: family=0, idx=0, count=1, kbase_stub=1
+PANVKDBG create_device: queues done
+PANVKDBG GDPA name=vkAcquireNextImageKHR fn=0x0 device=0xb4000073781e6300 swapchain_ext=0\nPANVKDBG GDPA name=vkCreateSwapchainKHR fn=0x0 device=0xb4000073781e6300 swapchain_ext=0\nPANVKDBG GDPA name=vkDestroySwapchainKHR fn=0x0 device=0xb4000073781e6300 swapchain_ext=0\nPANVKDBG GDPA name=vkGetSwapchainImagesKHR fn=0x0 device=0xb4000073781e6300 swapchain_ext=0\nPANVKDBG GDPA name=vkQueuePresentKHR fn=0x0 device=0xb4000073781e6300 swapchain_ext=0\nPANVKDBG GDPA name=vkAcquireNextImage2KHR fn=0x0 device=0xb4000073781e6300 swapchain_ext=0\nPANVKDBG GetDeviceQueue2 family=0 idx=0 -> queue=0xb400007378070540 (flags=0x0, found=1)
+PANVKDBG IMAGE_BIND img=0xb400007378010c00 mem=0xb40000737806abe0 memdev=00000074303d4000 offset=0000000000000000 modifier=0800000000000351 planes=1 format=37 usage=0000000000000015
+PANVKDBG IMAGE_PLANE img=0xb400007378010c00 plane=0 base=00000074303d4000 mem_offset=0000000000000000
+PANVKDBG IMAGE_BIND img=0xb400007378011800 mem=0xb40000737806ac80 memdev=000000743040e000 offset=0000000000000000 modifier=0800000000000341 planes=1 format=124 usage=0000000000000024
+PANVKDBG IMAGE_PLANE img=0xb400007378011800 plane=0 base=000000743040e000 mem_offset=0000000000000000
+{"check": "eds1.depth_test_enable", "feature": "VK_EXT_extended_dynamic_state", "bit": "extendedDynamicState", "sabotage": false, "loaded_via": "adrenotools", "device_name": "Mali-G77 MC9", "extension_listed": true, "advertised": true, "verdict": "pass", "evidence": [{"what":"depth test on: near wins","x":16,"y":32,"want":[0,0,255,255],"got":[0,0,255,255],"ok":true}, {"what":"depth test off: last draw wins","x":48,"y":32,"want":[0,255,0,255],"got":[0,255,0,255],"ok":true}]}

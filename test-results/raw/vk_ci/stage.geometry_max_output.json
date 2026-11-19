@@ -1,0 +1,1 @@
+{"check": "stage.geometry_max_output", "feature": "core", "bit": "geometryShader", "sabotage": false, "loaded_via": "adrenotools", "device_name": "Mali-G77 MC9", "extension_listed": true, "advertised": true, "verdict": "unsupported", "note": "limits below the spec minimum (256 vertices, 1024 components)", "evidence": []}

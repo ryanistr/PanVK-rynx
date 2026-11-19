@@ -1,0 +1,45 @@
+PANVKDBG kbase uAPI: JM 11.38\nPANVKDBG kbase MEM_EXEC_INIT ok (shaders -> exec)
+PANVKDBG kbase props: js_present=0x7 jsf=20e,1c9e,1e num_cg=1 cg0=0x660067 tiler_features=0x809 shader_present=0x660067
+WARNING: panvk is not a conformant Vulkan implementation, testing use only.
+MESA: warning: Gralloc doesn't support lock_ycbcr (video buffers won't be supported)
+MESA: info: Using fallback gralloc implementation
+Failed to create //.cache for shader cache (Read-only file system)---disabling.
+PANVKDBG WSI: uses_kbase=1 termux_raw=0 raw_dri3=0 kbase_dmabuf=0 sw_device=1 raw_fd_modifier=0
+PANVKDBG WSI host-import diagnostic enabled
+PANVKDBG CREATE_DEVICE BEFORE_INIT enabledExtensionCount=0\nPANVKDBG CREATE_DEVICE AFTER_INIT result=0 KHR_swapchain=0\nPANVKDBG kbase uAPI: JM 11.38\nPANVKDBG kbase MEM_EXEC_INIT ok (shaders -> exec)
+PANVKDBG kbase props: js_present=0x7 jsf=20e,1c9e,1e num_cg=1 cg0=0x660067 tiler_features=0x809 shader_present=0x660067
+PANVKDBG NATIVEBO REGISTER gpu=0000007890600000 cpu=0x7890600000 size=134217728 count=1
+PANVKDBG NATIVEBO REGISTER gpu=0000007887c00000 cpu=0x7887c00000 size=144003072 count=2
+PANVKDBG panvk_queue_create: family=0, idx=0, count=1, kbase_stub=1
+PANVKDBG create_device: queues done
+PANVKDBG GDPA name=vkAcquireNextImageKHR fn=0x0 device=0xb4000078a23de680 swapchain_ext=0\nPANVKDBG GDPA name=vkCreateSwapchainKHR fn=0x0 device=0xb4000078a23de680 swapchain_ext=0\nPANVKDBG GDPA name=vkDestroySwapchainKHR fn=0x0 device=0xb4000078a23de680 swapchain_ext=0\nPANVKDBG GDPA name=vkGetSwapchainImagesKHR fn=0x0 device=0xb4000078a23de680 swapchain_ext=0\nPANVKDBG GDPA name=vkQueuePresentKHR fn=0x0 device=0xb4000078a23de680 swapchain_ext=0\nPANVKDBG GDPA name=vkAcquireNextImage2KHR fn=0x0 device=0xb4000078a23de680 swapchain_ext=0\nPANVKDBG GetDeviceQueue2 family=0 idx=0 -> queue=0xb4000078a2270540 (flags=0x0, found=1)
+PANVKDBG IMAGE_BIND img=0xb4000078a2210c00 mem=0xb4000078a226abe0 memdev=000000795b6e1000 offset=0000000000000000 modifier=0810000000000001 planes=1 format=98 usage=000000000000001e
+PANVKDBG IMAGE_PLANE img=0xb4000078a2210c00 plane=0 base=000000795b6e1000 mem_offset=0000000000000000
+PANVKDBG CREATE_DEVICE BEFORE_INIT enabledExtensionCount=0\nPANVKDBG CREATE_DEVICE AFTER_INIT result=0 KHR_swapchain=0\nPANVKDBG kbase uAPI: JM 11.38\nPANVKDBG kbase MEM_EXEC_INIT ok (shaders -> exec)
+PANVKDBG kbase props: js_present=0x7 jsf=20e,1c9e,1e num_cg=1 cg0=0x660067 tiler_features=0x809 shader_present=0x660067
+PANVKDBG NATIVEBO REGISTER gpu=000000787fc00000 cpu=0x787fc00000 size=134217728 count=1
+PANVKDBG NATIVEBO REGISTER gpu=0000007877200000 cpu=0x7877200000 size=144003072 count=2
+PANVKDBG panvk_queue_create: family=0, idx=0, count=1, kbase_stub=1
+PANVKDBG create_device: queues done
+PANVKDBG GDPA name=vkAcquireNextImageKHR fn=0x0 device=0xb40000789c07d000 swapchain_ext=0\nPANVKDBG GDPA name=vkCreateSwapchainKHR fn=0x0 device=0xb40000789c07d000 swapchain_ext=0\nPANVKDBG GDPA name=vkDestroySwapchainKHR fn=0x0 device=0xb40000789c07d000 swapchain_ext=0\nPANVKDBG GDPA name=vkGetSwapchainImagesKHR fn=0x0 device=0xb40000789c07d000 swapchain_ext=0\nPANVKDBG GDPA name=vkQueuePresentKHR fn=0x0 device=0xb40000789c07d000 swapchain_ext=0\nPANVKDBG GDPA name=vkAcquireNextImage2KHR fn=0x0 device=0xb40000789c07d000 swapchain_ext=0\nPANVKDBG GetDeviceQueue2 family=0 idx=0 -> queue=0xb4000078a2270a80 (flags=0x0, found=1)
+PANVKDBG IMAGE_BIND img=0xb4000078a2211800 mem=0xb4000078a226af00 memdev=000000795b6cd000 offset=0000000000000000 modifier=0810000000000001 planes=1 format=98 usage=000000000000001e
+PANVKDBG IMAGE_PLANE img=0xb4000078a2211800 plane=0 base=000000795b6cd000 mem_offset=0000000000000000
+PANVKDBG CREATE_DEVICE BEFORE_INIT enabledExtensionCount=0\nPANVKDBG CREATE_DEVICE AFTER_INIT result=0 KHR_swapchain=0\nPANVKDBG kbase uAPI: JM 11.38\nPANVKDBG kbase MEM_EXEC_INIT ok (shaders -> exec)
+PANVKDBG kbase props: js_present=0x7 jsf=20e,1c9e,1e num_cg=1 cg0=0x660067 tiler_features=0x809 shader_present=0x660067
+PANVKDBG NATIVEBO REGISTER gpu=000000786f200000 cpu=0x786f200000 size=134217728 count=1
+PANVKDBG NATIVEBO REGISTER gpu=0000007866800000 cpu=0x7866800000 size=144003072 count=2
+PANVKDBG panvk_queue_create: family=0, idx=0, count=1, kbase_stub=1
+PANVKDBG create_device: queues done
+PANVKDBG GDPA name=vkAcquireNextImageKHR fn=0x0 device=0xb40000789c0826c0 swapchain_ext=0\nPANVKDBG GDPA name=vkCreateSwapchainKHR fn=0x0 device=0xb40000789c0826c0 swapchain_ext=0\nPANVKDBG GDPA name=vkDestroySwapchainKHR fn=0x0 device=0xb40000789c0826c0 swapchain_ext=0\nPANVKDBG GDPA name=vkGetSwapchainImagesKHR fn=0x0 device=0xb40000789c0826c0 swapchain_ext=0\nPANVKDBG GDPA name=vkQueuePresentKHR fn=0x0 device=0xb40000789c0826c0 swapchain_ext=0\nPANVKDBG GDPA name=vkAcquireNextImage2KHR fn=0x0 device=0xb40000789c0826c0 swapchain_ext=0\nPANVKDBG GetDeviceQueue2 family=0 idx=0 -> queue=0xb4000078a2270e00 (flags=0x0, found=1)
+PANVKDBG IMAGE_BIND img=0xb4000078a2212400 mem=0xb4000078a226b220 memdev=000000795b2ff000 offset=0000000000000000 modifier=0810000000000001 planes=1 format=98 usage=000000000000001e
+PANVKDBG IMAGE_PLANE img=0xb4000078a2212400 plane=0 base=000000795b2ff000 mem_offset=0000000000000000
+PANVKDBG CREATE_DEVICE BEFORE_INIT enabledExtensionCount=0\nPANVKDBG CREATE_DEVICE AFTER_INIT result=0 KHR_swapchain=0\nPANVKDBG kbase uAPI: JM 11.38\nPANVKDBG kbase MEM_EXEC_INIT ok (shaders -> exec)
+PANVKDBG kbase props: js_present=0x7 jsf=20e,1c9e,1e num_cg=1 cg0=0x660067 tiler_features=0x809 shader_present=0x660067
+PANVKDBG NATIVEBO REGISTER gpu=000000785e800000 cpu=0x785e800000 size=134217728 count=1
+PANVKDBG NATIVEBO REGISTER gpu=0000007855e00000 cpu=0x7855e00000 size=144003072 count=2
+PANVKDBG panvk_queue_create: family=0, idx=0, count=1, kbase_stub=1
+PANVKDBG create_device: queues done
+PANVKDBG GDPA name=vkAcquireNextImageKHR fn=0x0 device=0xb4000078a228d300 swapchain_ext=0\nPANVKDBG GDPA name=vkCreateSwapchainKHR fn=0x0 device=0xb4000078a228d300 swapchain_ext=0\nPANVKDBG GDPA name=vkDestroySwapchainKHR fn=0x0 device=0xb4000078a228d300 swapchain_ext=0\nPANVKDBG GDPA name=vkGetSwapchainImagesKHR fn=0x0 device=0xb4000078a228d300 swapchain_ext=0\nPANVKDBG GDPA name=vkQueuePresentKHR fn=0x0 device=0xb4000078a228d300 swapchain_ext=0\nPANVKDBG GDPA name=vkAcquireNextImage2KHR fn=0x0 device=0xb4000078a228d300 swapchain_ext=0\nPANVKDBG GetDeviceQueue2 family=0 idx=0 -> queue=0xb4000078a2271180 (flags=0x0, found=1)
+PANVKDBG IMAGE_BIND img=0xb4000078a2213000 mem=0xb4000078a226b540 memdev=000000795b247000 offset=0000000000000000 modifier=0810000000000001 planes=1 format=98 usage=000000000000001e
+PANVKDBG IMAGE_PLANE img=0xb4000078a2213000 plane=0 base=000000795b247000 mem_offset=0000000000000000
+{"check": "sync.first_submit_clear_then_compute", "feature": "core", "bit": "Vulkan 1.0", "sabotage": false, "loaded_via": "adrenotools", "device_name": "Mali-G77 MC9", "extension_listed": true, "advertised": true, "verdict": "pass", "evidence": [{"what":"repetition 1 of 4, new device: texels of slices 1 and 2 holding the clear value 0x5A5A1234","want":[32],"got":[32],"ok":true}, {"what":"repetition 2 of 4, new device: texels of slices 1 and 2 holding the clear value 0x5A5A1234","want":[32],"got":[32],"ok":true}, {"what":"repetition 3 of 4, new device: texels of slices 1 and 2 holding the clear value 0x5A5A1234","want":[32],"got":[32],"ok":true}, {"what":"repetition 4 of 4, new device: texels of slices 1 and 2 holding the clear value 0x5A5A1234","want":[32],"got":[32],"ok":true}]}
