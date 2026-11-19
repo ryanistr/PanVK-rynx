@@ -103,8 +103,13 @@ flowchart LR
   switches them to `os_get_option()`; CI run `44539359501` succeeded and produced library
   SHA256 `d38f739efdf499698a613a5e9a7e34f7edc7bbaaf910ec18ce7c3b390c69506e`.
 - Impact: enables real on-device A/B of shader/overlap options without rebuilding a driver
-  for each candidate. A subsequent knob sweep is in progress.
-- Next change: use the results of the sweep to pick a default change, if any.
+  for each candidate. Measured sweep (all `valid: true` unless noted, driver
+  `d38f739e…`, GPU 886 MHz):
+  - baseline: 17.711 ms
+  - `PANVK_TEX_WATERFALL=all`: 17.723 ms (noise)
+  - `PANVK_TEX_WATERFALL=0`: 17.625 ms (report invalid, thermal status 2)
+  - `PANVK_OVERLAP=0`: 17.851 ms (report invalid, thermal status 2)
+- Next change: no knob default change; none produced a repeatable gain.
 
 ### [P2] Pre-existing patch-applicability drift against the glibc tag
 
