@@ -28,14 +28,14 @@ Subject: [PATCH] panvk/v9: use the full tile buffer for fill-bound render passes
  
        .tile_rt_budget_B =
 +#if PAN_ARCH == 9
-+         debug_get_bool_option_v9_full_tib()
++         debug_get_option_v9_full_tib()
 +            ? pan_query_tib_size(phys_dev->model)
 +            :
 +#endif
           pan_query_optimal_tib_size(PAN_ARCH, phys_dev->model),
        .tile_z_budget_B =
 +#if PAN_ARCH == 9
-+         debug_get_bool_option_v9_full_tib()
++         debug_get_option_v9_full_tib()
 +            ? pan_query_z_tib_size(phys_dev->model)
 +            :
 +#endif
