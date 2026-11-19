@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PanVK-rynx <panvk@local>
+Date: Thu, 19 Nov 2026 18:30:00 +0700
+Subject: [PATCH] panvk/v9: default full tile buffer off after game GPU faults
+
+---
+ src/panfrost/vulkan/panvk_vX_cmd_draw.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+--- a/src/panfrost/vulkan/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/panvk_vX_cmd_draw.c
+@@ -20,10 +20,10 @@
+ /* Use the whole tile buffer for one tile instead of reserving half of it for
+  * tile pipelining. On fill-bound render passes the larger tile cuts the
+  * number of tile loads/stores and the tiler work; the FBD carries the same
+- * budget so the hardware allocates a single tile. PANVK_V9_FULL_TIB=0 keeps
+- * the pipelined, half-size tiles.
++ * budget so the hardware allocates a single tile. Off by default: the larger
++ * tile faults complex game render passes. PANVK_V9_FULL_TIB=1 opts in.
+  */
+-DEBUG_GET_ONCE_BOOL_OPTION(v9_full_tib, "PANVK_V9_FULL_TIB", true)
++DEBUG_GET_ONCE_BOOL_OPTION(v9_full_tib, "PANVK_V9_FULL_TIB", false)
+ #endif
+ 
+ static enum pan_fb_load_op
+-- 
+2.56.1

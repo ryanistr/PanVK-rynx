@@ -9,10 +9,10 @@ Device: `102562537K104189` (MT6893, Mali-G77 MC9, v9 JM, GPU locked 886 MHz)
 
 ## Verdict
 
-**Incomplete** for the performance target. The code change is implemented, applies cleanly
-to the bionic source tree, and builds successfully in GitHub Actions, but the X6739 USB
-adb connection dropped before the new driver could be installed and benchmarked. No
-on-device speedup is claimed.
+**Fail** for the performance target. The full-tile change introduced a P0 GPU fault in
+GTA V (see finding below) and no on-device speedup was ever measured. Patch 0015 reverts
+the default to the known-good half-tile path; the full-tile path stays opt-in for later
+investigation.
 
 ## Baseline (reproduced, not assumed)
 
@@ -79,6 +79,18 @@ flowchart LR
   passes (`hdr_2160p`, `subpasses`). Whether it improves the 1080p geomean without
   regressing other scenes is **not yet measured**.
 - Next change: install CI artifact and A/B with the knob on/off.
+
+### [P0] Full tile buffer hard-stops JM atoms in GTA V
+
+- Evidence: `test-results/GameCrash-20261119-175724.txt`. The crashing process loaded
+  `PanVK-rynx-26.3.1-bionic-26.3.1-bionic/libvulkan_panvk.so` (the 0014 CI artifact).
+  At 17:57:23 every outstanding kbase JM atom fails with `event=0x4` (`TERMINATED`,
+  a hard stop), including vertex/tiler (`core_req=0x16`), fragment (`0x1`) and the fence
+  atom (`0x202`); `vkWaitForFences` then returns -4 and the game aborts.
+- Impact: the 0014 full-tile default makes real game render passes fault. No measured
+  speedup justifies this regression.
+- Next change: patch 0015 flips `PANVK_V9_FULL_TIB` default to off; keep 0014 as an
+  opt-in experiment only.
 
 ### [P2] Pre-existing patch-applicability drift against the glibc tag
 
