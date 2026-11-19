@@ -183,7 +183,11 @@ A broader pass looked for any driver-side lever that could change the ~15 ms GPU
 - **The earlier knob sweep used invalid property names.** On Android `os_get_option()`
   translates `PANVK_TEX_WATERFALL` → `debug.mesa.panvk.tex.waterfall` (lowercase,
   `_`→`.`). The first sweep set `debug.mesa.PANVK_TEX_WATERFALL`, which was never read.
-  A corrected sweep with the translated names is running.
+  Corrected sweep (`panvk.knobs` driver, all reports `valid: true`):
+  baseline **17.598 ms**, `tex.waterfall=all` **17.446 ms** (−0.9%, noise),
+  `tex.waterfall=0` **17.546 ms** (noise). The properties are now confirmed read (scene
+  means shift slightly), but no knob produces a meaningful gain. Remaining knobs
+  (`v9.jm.merge.wg=0`, `overlap=0`) are still running.
 - **Driver-side levers already applied in the tree**: intra-pass barrier elision (0010,
   0012), Early-ZS LUT + polygon scissor + primitive reorder (0011, 0013), FP16 dual-rate
   and raster-order access (0011), async kbase fence export and dirty-only import sync
