@@ -1,1 +1,0 @@
-{"check": "xfb.geometry_shader_capture", "feature": "VK_EXT_transform_feedback", "bit": "transformFeedback", "sabotage": false, "loaded_via": "adrenotools", "device_name": "Mali-G77 MC9", "extension_listed": false, "advertised": false, "verdict": "fail", "error": "vkCreateGraphicsPipelines returned -8", "evidence": []}

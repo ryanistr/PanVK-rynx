@@ -4,3 +4,4 @@ out/
 *.tzst
 *.tzst.sha256
 .scratch/
+test-results/

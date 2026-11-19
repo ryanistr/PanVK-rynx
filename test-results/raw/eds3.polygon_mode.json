@@ -1,1 +1,0 @@
-{"check": "eds3.polygon_mode", "feature": "VK_EXT_extended_dynamic_state3", "bit": "extendedDynamicState3PolygonMode", "sabotage": false, "loaded_via": "adrenotools", "device_name": "Mali-G77 MC9", "extension_listed": true, "advertised": false, "verdict": "unsupported", "evidence": []}

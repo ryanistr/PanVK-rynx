@@ -1,1 +1,0 @@
-{"check": "perf.fb_local_barrier_large_draws", "feature": "core", "bit": "Vulkan 1.0", "sabotage": false, "loaded_via": "adrenotools", "device_name": "Mali-G77 MC9", "extension_listed": true, "advertised": true, "verdict": "fail", "evidence": [{"what":"sampled pixels with the wrong colour after 64 blended draws","want":[0],"got":[1247],"ok":false}]}

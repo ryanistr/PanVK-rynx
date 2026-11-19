@@ -1,1 +1,0 @@
-{"check": "robust.buffer_access2", "feature": "VK_EXT_robustness2", "bit": "robustBufferAccess2", "sabotage": false, "loaded_via": "adrenotools", "device_name": "Mali-G77 MC9", "extension_listed": true, "advertised": false, "verdict": "unsupported", "evidence": []}

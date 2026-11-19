@@ -1,1 +1,0 @@
-{"check": "stage.geometry_point_to_quad", "feature": "VkPhysicalDeviceFeatures", "bit": "geometryShader", "sabotage": false, "loaded_via": "adrenotools", "device_name": "Mali-G77 MC9", "extension_listed": false, "advertised": false, "verdict": "fail", "error": "vkCreateGraphicsPipelines returned -8", "evidence": []}

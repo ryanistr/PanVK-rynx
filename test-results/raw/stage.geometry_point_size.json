@@ -1,1 +1,0 @@
-{"check": "stage.geometry_point_size", "feature": "core", "bit": "shaderTessellationAndGeometryPointSize", "sabotage": false, "loaded_via": "adrenotools", "device_name": "Mali-G77 MC9", "extension_listed": true, "advertised": false, "verdict": "unsupported", "note": "needs geometryShader, shaderTessellationAndGeometryPointSize and largePoints", "evidence": []}

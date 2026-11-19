@@ -1,9 +1,0 @@
-PANVKDBG kbase uAPI: JM 11.38\nPANVKDBG kbase MEM_EXEC_INIT ok (shaders -> exec)
-PANVKDBG kbase props: js_present=0x7 jsf=20e,1c9e,1e num_cg=1 cg0=0x660067 tiler_features=0x809 shader_present=0x660067
-WARNING: panvk is not a conformant Vulkan implementation, testing use only.
-MESA: warning: Gralloc doesn't support lock_ycbcr (video buffers won't be supported)
-MESA: info: Using fallback gralloc implementation
-Failed to create //.cache for shader cache (Read-only file system)---disabling.
-PANVKDBG WSI: uses_kbase=1 termux_raw=0 raw_dri3=0 kbase_dmabuf=0 sw_device=1 raw_fd_modifier=0
-PANVKDBG WSI host-import diagnostic enabled
-{"check": "limit.viewports", "feature": "VkPhysicalDeviceFeatures", "bit": "multiViewport", "sabotage": false, "loaded_via": "adrenotools", "device_name": "Mali-G77 MC9", "extension_listed": true, "advertised": false, "verdict": "unsupported", "evidence": []}

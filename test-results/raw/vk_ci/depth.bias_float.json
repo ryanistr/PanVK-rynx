@@ -1,1 +1,0 @@
-{"check": "depth.bias_float", "feature": "VK_EXT_depth_bias_control", "bit": "floatRepresentation", "sabotage": false, "loaded_via": "adrenotools", "device_name": "Mali-G77 MC9", "extension_listed": true, "advertised": false, "verdict": "unsupported", "evidence": []}

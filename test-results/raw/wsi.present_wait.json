@@ -1,1 +1,0 @@
-{"check": "wsi.present_wait", "feature": "core", "bit": "presentWait", "sabotage": false, "loaded_via": "adrenotools", "device_name": "Mali-G77 MC9", "extension_listed": false, "advertised": false, "verdict": "unsupported", "note": "VK_KHR_present_wait not listed", "evidence": []}
