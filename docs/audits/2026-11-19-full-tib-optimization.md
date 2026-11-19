@@ -203,6 +203,21 @@ The 2026-11-20 critique is correct and verified on-device:
   `pan_fau_foreach_reloc()` slots are never populated. faux123 sets the mask and emits the
   UBO→FAU data with `emit_ubo_push_copy` from `prepare_push_uniforms`.
 
+### UBO-push port attempt (2026-11-20, reverted)
+
+- Implemented patch 0015 using the REA evidence: set `fau.pushable_ubos`, cache bound-buffer
+  host pointers in `panvk_buffer`/`panvk_descriptor_set`, and fill FAU relocations in
+  `prepare_push_uniforms`. CI build `44609559796` succeeded (library `c9c776a1…`).
+- On-device result was **invalid**: `pipeline_barriers` improved 12.5 → 10.6 ms, but
+  `oit_linked_lists` and `compute_nbody` produced one flat colour in 2 of 3 rounds
+  (`report bench-c9c776a1663c-20261119T204052Z.json`, `valid: false`). The FAU slots for
+  blend/system UBOs (resource handle 1) need faux123's special sysval path; copying zeros
+  from an unbound descriptor broke those shaders.
+- Patch 0015 was reverted in `30161e8`. The driver is back to the known-good baseline;
+  no functional/visual regressions remain. This is an honest negative result: the UBO-push
+  gain is real (2 ms) but cannot be ported correctly without the sysval-UBO handling from
+  faux123's closed patch series.
+
 ### What faux123 actually does (observed, on-device)
 
 - faux123's README (public repo `faux123/panvk-faux123-driver-rp4pro`) names three fixes
