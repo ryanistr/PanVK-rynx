@@ -1,24 +1,48 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PanVK-rynx <panvk@local>
-Date: Fri, 20 Nov 2026 03:30:00 +0700
+Date: Fri, 20 Nov 2026 03:40:00 +0700
 Subject: [PATCH] panvk/v9: push constant UBO reads into FAU
 
 ---
- src/panfrost/vulkan/panvk_descriptor_set.h       |  8 ++++
- src/panfrost/vulkan/panvk_vX_cmd_push_constant.c | 39 +++++++++++++++++++++
- src/panfrost/vulkan/panvk_vX_descriptor_set.c    | 20 ++++++++
- src/panfrost/vulkan/panvk_vX_shader.c            |  4 +
- 4 files changed, 71 insertions(+)
+ src/panfrost/vulkan/panvk_buffer.c                  |  1 +
+ src/panfrost/vulkan/panvk_buffer.h                  |  5 +
+ src/panfrost/vulkan/panvk_descriptor_set.h          |  6 +
+ src/panfrost/vulkan/panvk_vX_cmd_push_constant.c    | 36 +++++++++++++++++
+ src/panfrost/vulkan/panvk_vX_descriptor_set.c       | 10 +++
+ src/panfrost/vulkan/panvk_vX_shader.c               |  3 +
+ 6 files changed, 61 insertions(+)
 
+--- a/src/panfrost/vulkan/panvk_buffer.c
++++ b/src/panfrost/vulkan/panvk_buffer.c
+@@ -89,6 +89,7 @@
+          *bind_status->pResult = VK_SUCCESS;
+ 
+       buffer->vk.device_address = mem->addr.dev + pBindInfos[i].memoryOffset;
++      buffer->host = mem->addr.host ? (char *)mem->addr.host + pBindInfos[i].memoryOffset : NULL;
+ 
+       panvk_address_binding_report(device, &buffer->vk.base,
+                                    buffer->vk.device_address, buffer->vk.size,
+--- a/src/panfrost/vulkan/panvk_buffer.h
++++ b/src/panfrost/vulkan/panvk_buffer.h
+@@ -14,6 +14,10 @@
+ 
+ struct panvk_buffer {
+    struct vk_buffer vk;
++
++   /* Host pointer of the bound device memory (if any), used by UBO->FAU
++    * push to copy constant UBO data into push uniforms. */
++   void *host;
+ };
+ 
+ VK_DEFINE_NONDISP_HANDLE_CASTS(panvk_buffer, vk.base, VkBuffer,
 --- a/src/panfrost/vulkan/panvk_descriptor_set.h
 +++ b/src/panfrost/vulkan/panvk_descriptor_set.h
-@@ -58,6 +58,11 @@
+@@ -58,6 +58,10 @@
  
     /* Includes adjustment for variable-sized descriptors */
     unsigned desc_count;
 +
-+   /* Host pointers for UBO/SSBO descriptors, indexed by descriptor index.
-+    * Used by UBO->FAU push to copy constant data into push uniforms. */
++   /* Host pointers for UBO/SSBO descriptors, indexed by descriptor index. */
 +#define PANVK_UBO_PUSH_MAX_DESCS 64
 +   void *buf_host[PANVK_UBO_PUSH_MAX_DESCS];
  };
@@ -34,15 +58,12 @@ Subject: [PATCH] panvk/v9: push constant UBO reads into FAU
  #include "panvk_cmd_buffer.h"
  #include "panvk_entrypoints.h"
  
-@@ -72,6 +73,33 @@
+@@ -72,6 +73,30 @@
              (repeat_faus[idx] & ((uint64_t)UINT32_MAX << (32 * !hi))) |
              ((uint64_t)fau->words[i].constant << (32 * hi));
        }
 +
-+      /* Copy pushed UBO words into the FAU relocation slots. The compiler
-+       * records (resource handle, byte offset) for each slot; the resource
-+       * handle encodes (descriptor set + 1) in its table bits and the
-+       * descriptor index in its index bits. */
++      /* Fill UBO->FAU relocation slots from the bound descriptors. */
 +      pan_fau_foreach_reloc(fau, i) {
 +         bool hi = (i & 1) != 0;
 +         unsigned idx = i / 2;
@@ -70,40 +91,27 @@ Subject: [PATCH] panvk/v9: push constant UBO reads into FAU
     return VK_SUCCESS;
 --- a/src/panfrost/vulkan/panvk_vX_descriptor_set.c
 +++ b/src/panfrost/vulkan/panvk_vX_descriptor_set.c
-@@ -5,6 +5,7 @@
-  * SPDX-License-Identifier: MIT
-  */
- 
-+#include "panvk_device_memory.h"
- #include <assert.h>
- #include <fcntl.h>
- #include <stdbool.h>
-@@ -284,6 +285,17 @@
+@@ -284,6 +284,13 @@
        cfg.size = align(range, is_ssbo ? 4 : 16);
     }
     write_desc(set, binding, elem, &desc, NO_SUBDESC);
 +
-+   /* Cache the host pointer of the bound buffer for UBO->FAU push. */
++   /* Cache the bound buffer's host pointer for UBO->FAU push. */
 +   const struct panvk_descriptor_set_binding_layout *bl =
 +      &set->layout->bindings[binding];
 +   uint32_t desc_idx = panvk_get_desc_index(bl, elem, NO_SUBDESC);
-+   if (desc_idx < PANVK_UBO_PUSH_MAX_DESCS && buffer->vk.device_memory) {
-+      struct panvk_device_memory *mem =
-+         panvk_device_memory_from_handle(buffer->vk.device_memory);
-+      if (mem && mem->addr.host)
-+         set->buf_host[desc_idx] = (char *)mem->addr.host + info->offset;
-+   }
++   if (desc_idx < PANVK_UBO_PUSH_MAX_DESCS && buffer->host)
++      set->buf_host[desc_idx] = (char *)buffer->host + info->offset;
  #endif
  }
  
 --- a/src/panfrost/vulkan/panvk_vX_shader.c
 +++ b/src/panfrost/vulkan/panvk_vX_shader.c
-@@ -3634,6 +3634,9 @@
+@@ -3634,6 +3634,8 @@
      * promoted constants. */
     input.fau.reserved = shader->fau.total_count * 2;
     input.fau.promote_immediates = true;
-+   /* Promote constant UBO reads (e.g. light arrays) to FAU loads so the
-+    * fragment shader does not spill to TLS. Ported from faux123 v1.1.8. */
++   /* Promote constant UBO reads (e.g. light arrays) to FAU loads. */
 +   input.fau.pushable_ubos = 0xffffffff;
  
     struct util_dynarray binary = UTIL_DYNARRAY_INIT;
