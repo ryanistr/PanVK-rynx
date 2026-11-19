@@ -1,0 +1,77 @@
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+index a776bd7..5c052d9 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -4858,6 +4858,8 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+    pan_section_pack(job.cpu, MALLOC_VERTEX_JOB, DRAW, cfg) {
+       cfg.flags_0.primitive_barrier = cmdbuf->state.pending_fb_barrier;
+       cmdbuf->state.pending_fb_barrier = false;
++      cfg.flags_0.allow_primitive_reorder =
++         !cmdbuf->state.gfx.cb.info.any_dest_read;
+       cfg.flags_0.cull_front_face = !tess_nocull && polygon && (rs->cull_mode & VK_CULL_MODE_FRONT_BIT);
+       cfg.flags_0.cull_back_face = !tess_nocull && polygon && (rs->cull_mode & VK_CULL_MODE_BACK_BIT);
+       cfg.flags_0.front_face_ccw =
+diff --git a/src/panfrost/vulkan/panvk_vX_physical_device.c b/src/panfrost/vulkan/panvk_vX_physical_device.c
+index e4bebf3..777eb25 100644
+--- a/src/panfrost/vulkan/panvk_vX_physical_device.c
++++ b/src/panfrost/vulkan/panvk_vX_physical_device.c
+@@ -193,7 +193,7 @@ panvk_per_arch(get_physical_device_extensions)(
+       .EXT_non_seamless_cube_map = true,
+       .EXT_mutable_descriptor_type = true,
+       .EXT_multisampled_render_to_single_sampled = true,
+-      .EXT_multi_draw = PAN_ARCH >= 10,
++      .EXT_multi_draw = PAN_ARCH >= 9,
+       .EXT_physical_device_drm = true,
+       .EXT_pipeline_creation_cache_control = true,
+       .EXT_pipeline_creation_feedback = true,
+@@ -207,7 +207,7 @@ panvk_per_arch(get_physical_device_extensions)(
+       .EXT_primitives_generated_query = PAN_ARCH >= 9,
+       .EXT_provoking_vertex = true,
+       .EXT_queue_family_foreign = true,
+-      .EXT_rasterization_order_attachment_access = PAN_ARCH >= 10,
++      .EXT_rasterization_order_attachment_access = PAN_ARCH >= 9,
+       .EXT_rgba10x6_formats = PAN_ARCH >= 11,
+       .EXT_robustness2 = true,
+       .EXT_sampler_filter_minmax = PAN_ARCH >= 10,
+@@ -252,7 +252,7 @@ panvk_per_arch(get_physical_device_extensions)(
+       .ARM_shader_core_builtins = true,
+       .ARM_shader_core_properties = true,
+       .ARM_scheduling_controls = true,
+-      .ARM_rasterization_order_attachment_access = PAN_ARCH >= 10,
++      .ARM_rasterization_order_attachment_access = PAN_ARCH >= 9,
+    };
+ }
+ 
+@@ -416,7 +416,7 @@ panvk_per_arch(get_physical_device_features)(
+       /* Bifrost has ATOM_C.i64 (jm-v7 041). */
+       .shaderBufferInt64Atomics = true,
+       .shaderSharedInt64Atomics = true,
+-      .shaderFloat16 = PAN_ARCH >= 10,
++      .shaderFloat16 = PAN_ARCH >= 9,
+       .shaderInt8 = true,
+       /* v6/v7: update-after-bind and mutable bindings are bindless, see
+        * panvk_binding_is_bindless() (jm-v7 050).
+@@ -794,7 +794,7 @@ panvk_per_arch(get_physical_device_features)(
+       .mutableDescriptorType = true,
+ 
+       /* VK_KHR_shader_fma */
+-      .shaderFmaFloat16 = PAN_ARCH >= 10,
++      .shaderFmaFloat16 = PAN_ARCH >= 9,
+       .shaderFmaFloat32 = true,
+       .shaderFmaFloat64 = false,
+ 
+@@ -840,10 +840,10 @@ panvk_per_arch(get_physical_device_features)(
+ #endif
+ 
+       /* VK_EXT_rasterization_order_attachment_access */
+-      .rasterizationOrderColorAttachmentAccess = PAN_ARCH >= 10,
+-      .rasterizationOrderDepthAttachmentAccess = PAN_ARCH >= 10,
+-      .rasterizationOrderStencilAttachmentAccess = PAN_ARCH >= 10,
+-      .multiDraw = PAN_ARCH >= 10,
++      .rasterizationOrderColorAttachmentAccess = PAN_ARCH >= 9,
++      .rasterizationOrderDepthAttachmentAccess = PAN_ARCH >= 9,
++      .rasterizationOrderStencilAttachmentAccess = PAN_ARCH >= 9,
++      .multiDraw = PAN_ARCH >= 9,
+    };
+ }
+ 
