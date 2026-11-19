@@ -96,6 +96,16 @@ flowchart LR
   arch 9 at `16*16`; it only changed the FBD budget field, which is consistent with a
   hardware configuration fault and zero performance benefit.
 
+### [P2] Performance knobs were unreachable from Android properties
+
+- Evidence: `PANVK_OVERLAP`, `PANVK_TEX_WATERFALL`, `PANVK_V7_IDVS` and related knobs used
+  `getenv()` directly, so `adb shell setprop debug.mesa.<name>` had no effect. Patch 0014
+  switches them to `os_get_option()`; CI run `44539359501` succeeded and produced library
+  SHA256 `d38f739efdf499698a613a5e9a7e34f7edc7bbaaf910ec18ce7c3b390c69506e`.
+- Impact: enables real on-device A/B of shader/overlap options without rebuilding a driver
+  for each candidate. A subsequent knob sweep is in progress.
+- Next change: use the results of the sweep to pick a default change, if any.
+
 ### [P2] Pre-existing patch-applicability drift against the glibc tag
 
 - Evidence: on a clean worktree of `apexspan-svg/mesa-panvk-mali-g57` tag `v1.2.0`
@@ -116,6 +126,9 @@ flowchart LR
   `panvk-rynx-bionic` published.
 - Artifact SHA256 (tzst): `9c4e3023a993756532cd414b2c649368299367c7b33cb725a830a3ff80b6f0b7`
 - Extracted library SHA256: `28aaf270c8ee0f6657e9daa020990ccbfe67088adc94342032078c496d0b6cc9`
+- Cooled, valid A/B with GPU locked at 886 MHz: default `17.755 ms`, full-TIB opt-in
+  `17.692 ms` (0.35%, noise). Both reports `valid: true`; reports
+  `bench-70c17740f2fa-20261119T140840Z.json` / `...141324Z.json`.
 - Fix CI run: `44533132933` — **success**, artifact SHA256
   `0d6d86b2b69a68263ad0b88c5c5ba2d70d2aa46287f6de6e9de215659e38ba03`, library SHA256
   `70c17740f2fad8ad540fc4296a51ab4d2dff732d5a994dd518ebb34100b58613` (default-off full
