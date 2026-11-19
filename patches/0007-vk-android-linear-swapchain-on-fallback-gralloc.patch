@@ -1,0 +1,37 @@
+diff --git a/src/vulkan/runtime/vk_android.c b/src/vulkan/runtime/vk_android.c
+index 97637ed..ddb476f 100644
+--- a/src/vulkan/runtime/vk_android.c
++++ b/src/vulkan/runtime/vk_android.c
+@@ -40,6 +40,7 @@
+ #include "util/libsync.h"
+ #include "util/log.h"
+ #include "util/os_file.h"
++#include "util/u_debug.h"
+ #include "util/u_gralloc/u_gralloc.h"
+ 
+ #include <hardware/gralloc.h>
+@@ -456,6 +457,13 @@ setup_gralloc0_usage(VkFormat format, VkImageUsageFlags image_usage,
+    if (!gralloc_usage)
+       return VK_ERROR_FORMAT_NOT_SUPPORTED;
+ 
++   struct u_gralloc *u_gralloc = vk_android_get_ugralloc();
++   if (u_gralloc && u_gralloc_get_type(u_gralloc) == U_GRALLOC_TYPE_FALLBACK &&
++       !debug_get_bool_option("PANVK_ANB_AFBC", false)) {
++      gralloc_usage |=
++         GRALLOC_USAGE_SW_READ_RARELY | GRALLOC_USAGE_SW_WRITE_RARELY;
++   }
++
+    *out_gralloc_usage = gralloc_usage;
+ 
+    return VK_SUCCESS;
+@@ -661,6 +669,10 @@ vk_common_GetSwapchainGrallocUsage2ANDROID(
+       *grallocProducerUsage |= GRALLOC1_PRODUCER_USAGE_GPU_RENDER_TARGET;
+    if (gralloc_usage & GRALLOC_USAGE_HW_TEXTURE)
+       *grallocConsumerUsage |= GRALLOC1_CONSUMER_USAGE_GPU_TEXTURE;
++   if (gralloc_usage & GRALLOC_USAGE_SW_READ_MASK)
++      *grallocConsumerUsage |= GRALLOC1_CONSUMER_USAGE_CPU_READ;
++   if (gralloc_usage & GRALLOC_USAGE_SW_WRITE_MASK)
++      *grallocProducerUsage |= GRALLOC1_PRODUCER_USAGE_CPU_WRITE;
+ 
+    /* for front buffer rendering */
+    if (swapchainImageUsage & VK_SWAPCHAIN_IMAGE_USAGE_SHARED_BIT_ANDROID)
