@@ -1,0 +1,16 @@
+diff --git a/src/panfrost/lib/pan_afbc.h b/src/panfrost/lib/pan_afbc.h
+index 524ca19..1a9ad0c 100644
+--- a/src/panfrost/lib/pan_afbc.h
++++ b/src/panfrost/lib/pan_afbc.h
+@@ -377,6 +377,11 @@ pan_afbc_header_align(unsigned arch, uint64_t modifier)
+ static inline uint32_t
+ pan_afbc_body_align(unsigned arch, uint64_t modifier)
+ {
++#ifdef __ANDROID__
++   /* MediaTek gralloc (init_afbc) and DISP_OVL align non-tiled AFBC bodies to 1024 B. */
++   if (!(modifier & AFBC_FORMAT_MOD_TILED) && arch >= 6)
++      return 1024;
++#endif
+    /* Body and header alignments are actually the same. */
+    return pan_afbc_header_align(arch, modifier);
+ }
