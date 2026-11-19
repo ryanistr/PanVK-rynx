@@ -163,6 +163,33 @@ flowchart LR
 - Final driver correctness: vkvalidate on `panvk-knobs` is **87 pass / 100**, identical to
   the baseline driver (same pre-existing fails, no new ones).
 
+## Deep-dive: checking for a missed optimization spot
+
+A broader pass looked for any driver-side lever that could change the ~15 ms GPU-work term:
+
+- **All 9 shader cores are active.** Kernel reports `Available core mask : 0x660067`
+  (9 bits set: cores 0,1,2,5,6,17,18,21,22) and `Current core mask (JS0/1/2) : 0x660067`.
+  `pan_query_core_count()` = `bitcount(shader_present)` = 9, and the default drirc core
+  masks (`UINT64_MAX`) are ANDed with `shader_present`, so no core is disabled by the
+  driver. There is no "only a few cores" bug to fix.
+- **Render workload is set by the app, not the driver.** Every run reports
+  `present_mode: Mailbox`, `frame_size: 1920x1080` (and `3840x2160` for `hdr_2160p`),
+  with vsync OFF. The driver cannot lower those resolutions without changing the
+  benchmark itself.
+- **Present-path CPU copy is not on this benchmark's path.** `PANVK_FPS_LOG` produced no
+  log file across a full benchmark run, so the app is not going through
+  `panvk_android_swapchain_post()`'s AHB→window memcpy; optimizing that copy would not
+  move these numbers.
+- **The earlier knob sweep used invalid property names.** On Android `os_get_option()`
+  translates `PANVK_TEX_WATERFALL` → `debug.mesa.panvk.tex.waterfall` (lowercase,
+  `_`→`.`). The first sweep set `debug.mesa.PANVK_TEX_WATERFALL`, which was never read.
+  A corrected sweep with the translated names is running.
+- **Driver-side levers already applied in the tree**: intra-pass barrier elision (0010,
+  0012), Early-ZS LUT + polygon scissor + primitive reorder (0011, 0013), FP16 dual-rate
+  and raster-order access (0011), async kbase fence export and dirty-only import sync
+  (0008, 0009). These are the standard v9 JM wins; none can remove the fundamental
+  fragment/compute work the scenes issue.
+
 ## Coverage
 
 - Inspected: patch series, bionic source tree, baseline benchmark reports, runtime knobs,
