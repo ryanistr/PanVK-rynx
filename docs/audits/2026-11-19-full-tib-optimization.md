@@ -10,9 +10,8 @@ Device: `102562537K104189` (MT6893, Mali-G77 MC9, v9 JM, GPU locked 886 MHz)
 ## Verdict
 
 **Fail** for the performance target. The full-tile change introduced a P0 GPU fault in
-GTA V (see finding below) and no on-device speedup was ever measured. Patch 0015 reverts
-the default to the known-good half-tile path; the full-tile path stays opt-in for later
-investigation.
+GTA V (see finding below) and no on-device speedup was ever measured. Patches 0014/0015
+have been removed from the series; the branch now builds the known-good baseline driver.
 
 ## Baseline (reproduced, not assumed)
 
@@ -88,9 +87,14 @@ flowchart LR
   a hard stop), including vertex/tiler (`core_req=0x16`), fragment (`0x1`) and the fence
   atom (`0x202`); `vkWaitForFences` then returns -4 and the game aborts.
 - Impact: the 0014 full-tile default makes real game render passes fault. No measured
-  speedup justifies this regression.
-- Next change: patch 0015 flips `PANVK_V9_FULL_TIB` default to off; keep 0014 as an
-  opt-in experiment only.
+  speedup justifies this regression. The change also cannot improve tile size on v9:
+  `pan_max_effective_tile_size(PAN_ARCH)` clamps v9 to `16*16` pixels, so doubling the
+  budget only changes the FBD budget field while the tile size stays the same — this
+  explains why it produced a fault rather than a gain.
+- Next change: patches 0014/0015 were removed entirely in commit `447c669`. The full-tile
+  experiment also cannot enlarge v9 tiles because `pan_max_effective_tile_size()` caps
+  arch 9 at `16*16`; it only changed the FBD budget field, which is consistent with a
+  hardware configuration fault and zero performance benefit.
 
 ### [P2] Pre-existing patch-applicability drift against the glibc tag
 
