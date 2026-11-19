@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PanVK-rynx <panvk@local>
+Date: Thu, 19 Nov 2026 21:02:00 +0700
+Subject: [PATCH] panvk: read performance knobs through os_get_option on Android
+
+---
+ src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c | 3 ++-
+ src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c  | 3 ++-
+ src/panfrost/vulkan/panvk_v7_knobs.h         | 15 ++++++++-------
+ 3 files changed, 12 insertions(+), 9 deletions(-)
+
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+@@ -17,6 +17,7 @@
+ #include "panvk_cmd_buffer.h"
+ #include "panvk_v7_knobs.h"
+ #include "util/log.h"
++#include "util/os_misc.h"
+ #include "panvk_cmd_desc_state.h"
+ #include "panvk_cmd_draw.h"
+ #include "panvk_cmd_frame_shaders.h"
+@@ -377,7 +378,7 @@
+ {
+    static int on = -1;
+    if (on < 0) {
+-      const char *e = getenv("PANVK_OVERLAP");
++      const char *e = os_get_option("PANVK_OVERLAP");
+       on = !(e && e[0] == '0');
+    }
+    return on;
+--- a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
+@@ -27,6 +27,7 @@
+ #include "panvk_priv_bo.h"
+ #include "panvk_queue.h"
+ #include "util/os_time.h"
++#include "util/os_misc.h"
+ 
+ #include "vk_framebuffer.h"
+ #include "vk_sync.h"
+@@ -68,7 +69,7 @@
+ {
+    static int on = -1;
+    if (on < 0) {
+-      const char *e = getenv("PANVK_OVERLAP");
++      const char *e = os_get_option("PANVK_OVERLAP");
+       on = !(e && e[0] == '0');
+    }
+    return on;
+--- a/src/panfrost/vulkan/panvk_v7_knobs.h
++++ b/src/panfrost/vulkan/panvk_v7_knobs.h
+@@ -17,6 +17,8 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
++#include "util/os_misc.h"
++
+ /* PANVK_TEX_WATERFALL: 0 = off, 1 = NonUniform divergent indices (default,
+  * jm-v7 087), 2 = every divergent index ("all", jm-v7 085).
+  */
+@@ -25,7 +27,7 @@
+ {
+    static int v = -1;
+    if (v < 0) {
+-      const char *e = getenv("PANVK_TEX_WATERFALL");
++      const char *e = os_get_option("PANVK_TEX_WATERFALL");
+       v = !e ? 1 : !strcmp(e, "0") ? 0 : !strcmp(e, "all") ? 2 : 1;
+    }
+    return v;
+@@ -37,7 +39,7 @@
+ {
+    static int v = -2;
+    if (v == -2) {
+-      const char *e = getenv("PANVK_V7_IDVS");
++      const char *e = os_get_option("PANVK_V7_IDVS");
+       v = e ? (e[0] == '1' ? 1 : 0) : -1;
+    }
+    return v;
+@@ -49,7 +51,7 @@
+ {
+    static int v = -1;
+    if (v < 0) {
+-      const char *e = getenv("PANVK_V7_DESC_REORDER");
++      const char *e = os_get_option("PANVK_V7_DESC_REORDER");
+       v = !(e && e[0] == '0');
+    }
+    return v;
+@@ -64,7 +66,7 @@
+ {
+    static int v = -1;
+    if (v < 0) {
+-      const char *e = getenv("PANVK_V7_TEXEL_WIDTH");
++      const char *e = os_get_option("PANVK_V7_TEXEL_WIDTH");
+       v = !(e && e[0] == '0');
+    }
+    return v;
+-- 
+2.56.1
