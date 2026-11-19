@@ -1,0 +1,79 @@
+diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c
+index aad56a3..4646ee2 100644
+--- a/src/panfrost/lib/kmod/kbase_kmod.c
++++ b/src/panfrost/lib/kmod/kbase_kmod.c
+@@ -304,6 +304,8 @@ struct kbase_kmod_bo {
+ 
+    /* On kbase_kmod_dev::nc_bos (nc_link valid). */
+    bool nc_listed;
++   uint32_t nc_map_count;
++   bool nc_dirty;
+    struct list_head nc_link;
+ };
+ 
+@@ -3243,8 +3245,17 @@ kbase_kmod_bo_mmap(struct pan_kmod_bo *bo, UNUSED int prot, UNUSED int flags,
+       return MAP_FAILED;
+    }
+ 
+-   if (host_addr == NULL || host_addr == kbase_bo->cpu_ptr)
++   if (host_addr == NULL || host_addr == kbase_bo->cpu_ptr) {
++      if (kbase_bo->nc_listed) {
++         struct kbase_kmod_dev *kd =
++            container_of(bo->dev, struct kbase_kmod_dev, base);
++         simple_mtx_lock(&kd->nc_lock);
++         kbase_bo->nc_map_count++;
++         kbase_bo->nc_dirty = true;
++         simple_mtx_unlock(&kd->nc_lock);
++      }
+       return kbase_bo->cpu_ptr;
++   }
+ 
+    if (kbase_bo->dmabuf_fd < 0) {
+       mesa_loge("kbase: placed map of a non-dma-buf BO is not supported");
+@@ -3256,9 +3267,17 @@ kbase_kmod_bo_mmap(struct pan_kmod_bo *bo, UNUSED int prot, UNUSED int flags,
+     * caller's (usually a PROT_NONE reservation). */
+    void *p = mmap(host_addr, bo->size, PROT_READ | PROT_WRITE,
+                   MAP_SHARED | MAP_FIXED, kbase_bo->dmabuf_fd, 0);
+-   if (p == MAP_FAILED)
++   if (p == MAP_FAILED) {
+       mesa_loge("kbase: placed dma-buf mmap at %p failed: %s", host_addr,
+                 strerror(errno));
++   } else if (kbase_bo->nc_listed) {
++      struct kbase_kmod_dev *kd =
++         container_of(bo->dev, struct kbase_kmod_dev, base);
++      simple_mtx_lock(&kd->nc_lock);
++      kbase_bo->nc_map_count++;
++      kbase_bo->nc_dirty = true;
++      simple_mtx_unlock(&kd->nc_lock);
++   }
+    return p;
+ }
+ 
+@@ -3271,6 +3290,16 @@ kbase_kmod_bo_munmap(struct pan_kmod_bo *bo, void *host_addr, size_t size)
+    struct kbase_kmod_bo *kbase_bo =
+       container_of(bo, struct kbase_kmod_bo, base);
+ 
++   if (kbase_bo->nc_listed) {
++      struct kbase_kmod_dev *kd =
++         container_of(bo->dev, struct kbase_kmod_dev, base);
++      simple_mtx_lock(&kd->nc_lock);
++      if (kbase_bo->nc_map_count > 0)
++         kbase_bo->nc_map_count--;
++      kbase_bo->nc_dirty = true;
++      simple_mtx_unlock(&kd->nc_lock);
++   }
++
+    if (host_addr && host_addr != kbase_bo->cpu_ptr &&
+        host_addr != kbase_bo->gpu_mapping)
+       return munmap(host_addr, size);
+@@ -3930,6 +3959,10 @@ kbase_kmod_jm_clean_imports(struct pan_kmod_dev *dev)
+ 
+    simple_mtx_lock(&kd->nc_lock);
+    list_for_each_entry(struct kbase_kmod_bo, bo, &kd->nc_bos, nc_link) {
++      if (bo->nc_map_count == 0 && !bo->nc_dirty)
++         continue;
++      if (bo->nc_map_count == 0)
++         bo->nc_dirty = false;
+       struct dma_buf_sync sync = {
+          .flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE,
+       };

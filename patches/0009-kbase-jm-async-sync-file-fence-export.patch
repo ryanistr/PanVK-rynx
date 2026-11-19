@@ -1,0 +1,138 @@
+diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c
+index aad56a3..3ed80d8 100644
+--- a/src/panfrost/lib/kmod/kbase_kmod.c
++++ b/src/panfrost/lib/kmod/kbase_kmod.c
+@@ -256,6 +256,9 @@ struct kbase_kmod_dev {
+     * (kbase_kmod_jm_clean_imports()). */
+    simple_mtx_t nc_lock;
+    struct list_head nc_bos;
++
++   int fence_stream_fd;
++   bool fence_stream_inited;
+ };
+ 
+ struct kbase_kmod_vm {
+@@ -2185,6 +2188,7 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
+    kbase_dev->dma_heap_fd = -1;
+    kbase_dev->dma_heap_uncached_fd = -1;
+    kbase_dev->kcpu.fence_fd = -1;
++   kbase_dev->fence_stream_fd = -1;
+    simple_mtx_init(&kbase_dev->kcpu.lock, mtx_plain);
+    simple_mtx_init(&kbase_dev->kcpu_export.lock, mtx_plain);
+    simple_mtx_init(&kbase_dev->nc_lock, mtx_plain);
+@@ -2370,6 +2374,8 @@ kbase_kmod_dev_destroy(struct pan_kmod_dev *dev)
+    simple_mtx_destroy(&kbase_dev->nc_lock);
+ 
+    if (!kbase_dev->is_csf) {
++      if (kbase_dev->fence_stream_fd >= 0)
++         close(kbase_dev->fence_stream_fd);
+       simple_mtx_destroy(&kbase_dev->atoms_read_lock);
+       simple_mtx_destroy(&kbase_dev->atoms_lock);
+    }
+@@ -3944,6 +3950,46 @@ kbase_kmod_jm_clean_imports(struct pan_kmod_dev *dev)
+    simple_mtx_unlock(&kd->nc_lock);
+ }
+ 
++int
++kbase_kmod_jm_fence_after(struct pan_kmod_dev *dev, uint64_t dep_atom)
++{
++   struct kbase_kmod_dev *kd = container_of(dev, struct kbase_kmod_dev, base);
++   if (kd->is_csf || !dep_atom)
++      return -1;
++
++   simple_mtx_lock(&kd->atoms_lock);
++   if (!kd->fence_stream_inited) {
++      kd->fence_stream_inited = true;
++      if (!debug_get_bool_option("PANVK_JM_SYNC_FENCE", true)) {
++         kd->fence_stream_fd = -1;
++      } else {
++         struct kbase_ioctl_stream_create sc = { .name = "panvk" };
++         int sfd = ioctl(dev->fd, KBASE_IOCTL_STREAM_CREATE, &sc);
++         kd->fence_stream_fd = (sfd >= 0) ? sfd : -1;
++         mesa_logi("kbase: JM sync_file fence export %s (stream_fd=%d)",
++                   kd->fence_stream_fd >= 0 ? "enabled" : "unavailable",
++                   kd->fence_stream_fd);
++      }
++   }
++   int stream_fd = kd->fence_stream_fd;
++   simple_mtx_unlock(&kd->atoms_lock);
++
++   if (stream_fd < 0)
++      return -1;
++
++   struct {
++      int32_t fd;
++      int32_t stream_fd;
++   } fence = { -1, stream_fd };
++
++   uint64_t atom = kbase_kmod_job_submit_dep(
++      dev, (uintptr_t)&fence, 0x202u /* BASE_JD_REQ_SOFT_FENCE_TRIGGER */,
++      NULL, 0, dep_atom, BASE_JD_DEP_TYPE_ORDER, 0, 0, true);
++   if (!atom || fence.fd < 0)
++      return -1;
++   return fence.fd;
++}
++
+ bool
+ kbase_kmod_wait_atom(struct pan_kmod_dev *dev, uint64_t atom_number,
+                      int64_t timeout_ns)
+diff --git a/src/panfrost/lib/kmod/kbase_kmod.h b/src/panfrost/lib/kmod/kbase_kmod.h
+index 223a2cf..860be05 100644
+--- a/src/panfrost/lib/kmod/kbase_kmod.h
++++ b/src/panfrost/lib/kmod/kbase_kmod.h
+@@ -53,6 +53,7 @@ bool kbase_kmod_wait_atom(struct pan_kmod_dev *dev, uint64_t atom_number,
+                          int64_t timeout_ns);
+ void kbase_kmod_atom_release(struct pan_kmod_dev *dev, uint64_t atom_num);
+ void kbase_kmod_jm_clean_imports(struct pan_kmod_dev *dev);
++int kbase_kmod_jm_fence_after(struct pan_kmod_dev *dev, uint64_t dep_atom);
+ /* JM only: track the time with atoms in flight (enable once, for
+  * PANVK_GPU_STATS), and read it in ns. */
+ void kbase_kmod_jm_busy_track(struct pan_kmod_dev *dev);
+--- a/src/panfrost/vulkan/panvk_physical_device.c
++++ b/src/panfrost/vulkan/panvk_physical_device.c
+@@ -1114,15 +1114,40 @@
+    }
+    mtx_unlock(&ks->mutex);
+ 
+-   if (count == UINT32_MAX || pan_arch(dev->kmod.dev->props.gpu_id) < 10) {
++   if (pan_arch(dev->kmod.dev->props.gpu_id) < 10) {
++      uint64_t jm_targets[PANVK_KBASE_SYNC_TARGET_COUNT] = {0};
++      unsigned jm_count = 0;
++      mtx_lock(&ks->mutex);
++      if (ks->state == KBASE_CPU_SYNC_PENDING ||
++          ks->state == KBASE_CPU_SYNC_WAITING) {
++         for (unsigned i = 0; i < PANVK_KBASE_SYNC_TARGET_COUNT; i++) {
++            if (ks->targets[i])
++               jm_targets[jm_count++] = ks->targets[i];
++         }
++      }
++      mtx_unlock(&ks->mutex);
++      if (jm_count > 0) {
++         for (unsigned i = 0; i + 1 < jm_count; i++)
++            kbase_kmod_wait_atom(dev->kmod.dev, jm_targets[i], -1);
++         int jfd = kbase_kmod_jm_fence_after(dev->kmod.dev, jm_targets[jm_count - 1]);
++         if (jfd >= 0) {
++            *sync_file = jfd;
++            return VK_SUCCESS;
++         }
++      }
++      result = kbase_cpu_sync_wait_one(device, ks, VK_SYNC_WAIT_COMPLETE,
++                                       UINT64_MAX);
++      if (result != VK_SUCCESS)
++         return result;
++      *sync_file = -1;
++      return VK_SUCCESS;
++   }
++
++   if (count == UINT32_MAX) {
+       result = kbase_cpu_sync_wait_one(device, ks, VK_SYNC_WAIT_COMPLETE,
+                                        UINT64_MAX);
+       if (result != VK_SUCCESS)
+          return result;
+-      if (pan_arch(dev->kmod.dev->props.gpu_id) < 10) {
+-         *sync_file = -1;
+-         return VK_SUCCESS;
+-      }
+       count = 0;
+    }
+ 
