@@ -1,0 +1,112 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PanVK-rynx <panvk@local>
+Date: Fri, 20 Nov 2026 03:30:00 +0700
+Subject: [PATCH] panvk/v9: push constant UBO reads into FAU
+
+---
+ src/panfrost/vulkan/panvk_descriptor_set.h       |  8 ++++
+ src/panfrost/vulkan/panvk_vX_cmd_push_constant.c | 39 +++++++++++++++++++++
+ src/panfrost/vulkan/panvk_vX_descriptor_set.c    | 20 ++++++++
+ src/panfrost/vulkan/panvk_vX_shader.c            |  4 +
+ 4 files changed, 71 insertions(+)
+
+--- a/src/panfrost/vulkan/panvk_descriptor_set.h
++++ b/src/panfrost/vulkan/panvk_descriptor_set.h
+@@ -58,6 +58,11 @@
+ 
+    /* Includes adjustment for variable-sized descriptors */
+    unsigned desc_count;
++
++   /* Host pointers for UBO/SSBO descriptors, indexed by descriptor index.
++    * Used by UBO->FAU push to copy constant data into push uniforms. */
++#define PANVK_UBO_PUSH_MAX_DESCS 64
++   void *buf_host[PANVK_UBO_PUSH_MAX_DESCS];
+ };
+ 
+ VK_DEFINE_NONDISP_HANDLE_CASTS(panvk_descriptor_set, base, VkDescriptorSet,
+--- a/src/panfrost/vulkan/panvk_vX_cmd_push_constant.c
++++ b/src/panfrost/vulkan/panvk_vX_cmd_push_constant.c
+@@ -4,6 +4,7 @@
+  */
+ 
+ #include "panvk_cmd_alloc.h"
++#include "pan_compiler.h"
+ #include "panvk_cmd_buffer.h"
+ #include "panvk_entrypoints.h"
+ 
+@@ -72,6 +73,33 @@
+             (repeat_faus[idx] & ((uint64_t)UINT32_MAX << (32 * !hi))) |
+             ((uint64_t)fau->words[i].constant << (32 * hi));
+       }
++
++      /* Copy pushed UBO words into the FAU relocation slots. The compiler
++       * records (resource handle, byte offset) for each slot; the resource
++       * handle encodes (descriptor set + 1) in its table bits and the
++       * descriptor index in its index bits. */
++      pan_fau_foreach_reloc(fau, i) {
++         bool hi = (i & 1) != 0;
++         unsigned idx = i / 2;
++         struct pan_ubo_relocation reloc = fau->words[i].relocation;
++         unsigned table = pan_res_handle_get_table(reloc.ubo);
++         unsigned desc_idx = pan_res_handle_get_index(reloc.ubo);
++         void *src = NULL;
++
++         if (table > 0 && table <= ARRAY_SIZE(cmdbuf->state.gfx.desc_state.sets) &&
++             desc_idx < PANVK_UBO_PUSH_MAX_DESCS) {
++            const struct panvk_descriptor_set *set =
++               cmdbuf->state.gfx.desc_state.sets[table - 1];
++            if (set)
++               src = set->buf_host[desc_idx];
++         }
++
++         uint32_t value = src ? *(const uint32_t *)((const char *)src + reloc.offset) : 0;
++         assert(idx < shader->fau.total_count);
++         repeat_faus[idx] =
++            (repeat_faus[idx] & ((uint64_t)UINT32_MAX << (32 * !hi))) |
++            ((uint64_t)value << (32 * hi));
++      }
+    }
+ 
+    return VK_SUCCESS;
+--- a/src/panfrost/vulkan/panvk_vX_descriptor_set.c
++++ b/src/panfrost/vulkan/panvk_vX_descriptor_set.c
+@@ -5,6 +5,7 @@
+  * SPDX-License-Identifier: MIT
+  */
+ 
++#include "panvk_device_memory.h"
+ #include <assert.h>
+ #include <fcntl.h>
+ #include <stdbool.h>
+@@ -284,6 +285,17 @@
+       cfg.size = align(range, is_ssbo ? 4 : 16);
+    }
+    write_desc(set, binding, elem, &desc, NO_SUBDESC);
++
++   /* Cache the host pointer of the bound buffer for UBO->FAU push. */
++   const struct panvk_descriptor_set_binding_layout *bl =
++      &set->layout->bindings[binding];
++   uint32_t desc_idx = panvk_get_desc_index(bl, elem, NO_SUBDESC);
++   if (desc_idx < PANVK_UBO_PUSH_MAX_DESCS && buffer->vk.device_memory) {
++      struct panvk_device_memory *mem =
++         panvk_device_memory_from_handle(buffer->vk.device_memory);
++      if (mem && mem->addr.host)
++         set->buf_host[desc_idx] = (char *)mem->addr.host + info->offset;
++   }
+ #endif
+ }
+ 
+--- a/src/panfrost/vulkan/panvk_vX_shader.c
++++ b/src/panfrost/vulkan/panvk_vX_shader.c
+@@ -3634,6 +3634,9 @@
+     * promoted constants. */
+    input.fau.reserved = shader->fau.total_count * 2;
+    input.fau.promote_immediates = true;
++   /* Promote constant UBO reads (e.g. light arrays) to FAU loads so the
++    * fragment shader does not spill to TLS. Ported from faux123 v1.1.8. */
++   input.fau.pushable_ubos = 0xffffffff;
+ 
+    struct util_dynarray binary = UTIL_DYNARRAY_INIT;
+    pan_shader_compile(nir, &input, &binary, &shader->info);
+-- 
+2.56.1
