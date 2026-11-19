@@ -154,6 +154,12 @@ flowchart LR
   **2.70 ms** and GPU work of about **15.0 ms** at 886 MHz. Even deleting all driver/CPU
   overhead leaves a ~15 ms floor, roughly 3x the 0–5 ms target. The only ways to reach
   that target are a much faster GPU or a much smaller render workload, not a driver patch.
+- CPU profile (simpleperf, 30 s stat + 17 s record on the FauxVKTest render process during
+  the benchmark): `0.298` CPUs used, ~40% of samples in kernel syscalls (mostly
+  `ioctl`/`epoll_pwait`), and the largest app frames are `ALooper_pollOnce`,
+  `HWCPipeStatsProvider::sample`, and `Surface::queueBuffer`. `libvulkan_panvk.so` appears
+  only at ~5% children in a few leaves. The 2.70 ms fixed component is wait/present time,
+  not a driver CPU hot loop.
 - Final driver correctness: vkvalidate on `panvk-knobs` is **87 pass / 100**, identical to
   the baseline driver (same pre-existing fails, no new ones).
 
