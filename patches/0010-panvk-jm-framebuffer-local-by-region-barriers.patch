@@ -1,0 +1,78 @@
+diff --git a/src/panfrost/vulkan/jm/panvk_cmd_buffer.h b/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
+index 6c46f16..2a2d69c 100644
+--- a/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
++++ b/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
+@@ -150,6 +150,7 @@ struct panvk_cmd_buffer {
+        */
+       uint32_t gpu_prerast_inst_base;
+ #endif
++      bool pending_fb_barrier;
+    } state;
+ };
+ 
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+index e5239dc..0893b42 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+@@ -540,15 +540,34 @@ panvk_per_arch(CmdPipelineBarrier2)(VkCommandBuffer commandBuffer,
+ {
+    VK_FROM_HANDLE(panvk_cmd_buffer, cmdbuf, commandBuffer);
+ 
+-   /* Caches are flushed/invalidated at batch boundaries for now, nothing to do
+-    * for memory barriers assuming we implement barriers with the creation of a
+-    * new batch.
+-    * FIXME: We can probably do better with a CacheFlush job that has the
+-    * barrier flag set to true.
++   /* Framebuffer-local barriers within an active render pass (VK_DEPENDENCY_BY_REGION_BIT)
++    * do not require closing and reopening the batch on TBDR Mali hardware.
++    * Closing the batch forces full framebuffer writeback to external DRAM and subsequent
++    * tile reloads, multiplying memory bandwidth and creating severe CPU bottleneck.
++    * For in-tile barriers, we preserve the current batch and set primitive_barrier on the next draw.
+     */
+-   if (cmdbuf->cur_batch) {
++   bool is_fb_local = false;
++   if (cmdbuf->cur_batch &&
++       (pDependencyInfo->dependencyFlags & VK_DEPENDENCY_BY_REGION_BIT) &&
++       pDependencyInfo->bufferMemoryBarrierCount == 0) {
++      bool valid_image_barriers = true;
++      for (uint32_t i = 0; i < pDependencyInfo->imageMemoryBarrierCount; i++) {
++         const VkImageMemoryBarrier2 *img_barrier = &pDependencyInfo->pImageMemoryBarriers[i];
++         if (img_barrier->oldLayout != img_barrier->newLayout ||
++             img_barrier->srcQueueFamilyIndex != img_barrier->dstQueueFamilyIndex) {
++            valid_image_barriers = false;
++            break;
++         }
++      }
++      if (valid_image_barriers)
++         is_fb_local = true;
++   }
++
++   if (cmdbuf->cur_batch && !is_fb_local) {
+       panvk_per_arch(cmd_close_batch)(cmdbuf);
+       panvk_per_arch(cmd_open_batch)(cmdbuf);
++   } else if (is_fb_local) {
++      cmdbuf->state.pending_fb_barrier = true;
+    }
+ 
+    /* BC emulation: an image leaving VK_IMAGE_LAYOUT_ZERO_INITIALIZED_EXT
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+index b9d56a2..a776bd7 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -4856,6 +4856,8 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+          (void)0;
+    }
+    pan_section_pack(job.cpu, MALLOC_VERTEX_JOB, DRAW, cfg) {
++      cfg.flags_0.primitive_barrier = cmdbuf->state.pending_fb_barrier;
++      cmdbuf->state.pending_fb_barrier = false;
+       cfg.flags_0.cull_front_face = !tess_nocull && polygon && (rs->cull_mode & VK_CULL_MODE_FRONT_BIT);
+       cfg.flags_0.cull_back_face = !tess_nocull && polygon && (rs->cull_mode & VK_CULL_MODE_BACK_BIT);
+       cfg.flags_0.front_face_ccw =
+@@ -7622,6 +7624,7 @@ panvk_per_arch(CmdEndRendering)(VkCommandBuffer commandBuffer)
+ 
+       panvk_per_arch(cmd_close_batch)(cmdbuf);
+       cmdbuf->cur_batch = NULL;
++      cmdbuf->state.pending_fb_barrier = false;
+       panvk_per_arch(cmd_meta_resolve_attachments)(cmdbuf);
+ #if PAN_ARCH == 9
+       /* Outside the pass, timestamp and occlusion queries take one slot. */

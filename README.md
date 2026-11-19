@@ -40,6 +40,7 @@ Patches are applied in filename order by `build.sh` and `build-bionic.sh` via `p
 | [`0007-vk-android-linear-swapchain-on-fallback-gralloc.patch`](patches/0007-vk-android-linear-swapchain-on-fallback-gralloc.patch) | Requests `GRALLOC_USAGE_SW_READ_RARELY \| GRALLOC_USAGE_SW_WRITE_RARELY` on fallback gralloc so swapchain buffers allocate linear (`DRM_FORMAT_MOD_LINEAR`), eliminating portrait/1080p `DISP_OVL` scanout noise while preserving AFBC on internal render targets. |
 | [`0008-kbase-jm-dirty-only-import-sync.patch`](patches/0008-kbase-jm-dirty-only-import-sync.patch) | Tracks `nc_map_count` and `nc_dirty` so `kbase_kmod_jm_clean_imports()` skips unmapped swapchain and static BOs, eliminating unnecessary `DMA_BUF_IOCTL_SYNC` flushes. |
 | [`0009-kbase-jm-async-sync-file-fence-export.patch`](patches/0009-kbase-jm-async-sync-file-fence-export.patch) | Implements `kbase_kmod_jm_fence_after()` using `KBASE_IOCTL_STREAM_CREATE` + `BASE_JD_REQ_SOFT_FENCE_TRIGGER` (`0x202`) for non-blocking async `sync_file` export on `vkQueuePresentKHR`. |
+| [`0010-panvk-jm-framebuffer-local-by-region-barriers.patch`](patches/0010-panvk-jm-framebuffer-local-by-region-barriers.patch) | Avoids closing and reopening batches on JM (`arch <= 9`) for `VK_DEPENDENCY_BY_REGION_BIT` barriers within active render passes, setting `cfg.flags_0.primitive_barrier = true` on the next v9 `MALLOC_VERTEX_JOB` draw descriptor to enable on-chip tile buffer reuse and eliminate DRAM writeback/reload cycles. |
 
 See [docs/PATCHES.md](docs/PATCHES.md) for full patch details.
 
