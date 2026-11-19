@@ -48,6 +48,13 @@ done
 
 ## Building
 
+- **Never build this driver locally. All builds go through GitHub Actions.** Do not run
+  `build.sh`, `build-bionic.sh`, `meson`, `ninja`, or any local cross-build in this repo or
+  in a scratch directory. Local toolchains on this workstation are not reproducible here
+  (NDK/LLVM/pkg-config differences) and are not an acceptable source of test artifacts.
+  Trigger `.github/workflows/build.yml` / `.github/workflows/build-bionic.yml` with `gh`
+  instead, then download the CI artifact. This overrides the scratch-build instructions
+  below; they remain only as documentation of what CI does.
 - **Run `build.sh` only on an aarch64 glibc host** (`ubuntu-24.04-arm`), or via the release
   workflow. It has no cross-compilation and no ELF-architecture assertion: on an x86_64
   workstation it happily produces an x86_64 `.so` packaged and named as the aarch64 driver.
