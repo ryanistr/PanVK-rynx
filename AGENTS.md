@@ -49,14 +49,13 @@ done
 ## Artifact ownership — absolute
 
 - **Never present, package, publish, or ship another party's binary as a PanVK-rynx
-  artifact or as our product.** In particular, faux123's closed-source
-  `libvulkan_panfrost.so` (sha `499e3eae…`, or any of their `.adpkg.zip` releases) is
-  **theirs**, not ours. It may be used as a local performance reference / RE target only.
-  Every artifact, release tag, asset name, and benchmark claim must come from a driver
-  built from this repository's own patches in our GitHub Actions workflows. Do not
-  rename, re-sign, rebrand, or redistribute third-party binaries, and do not attribute
-  their measurements to PanVK-rynx. If a gain exists only in a third-party binary, say so
-  explicitly and leave it out of our releases.
+  artifact or as our product.** Any third-party closed-source driver binary or package is
+  **theirs**, not ours. Such binaries may be used only as local performance references or
+  reverse-engineering targets. Every artifact, release tag, asset name, and benchmark claim
+  must come from a driver built from this repository's own patches in our GitHub Actions
+  workflows. Do not rename, re-sign, rebrand, or redistribute third-party binaries, and do
+  not attribute their measurements to PanVK-rynx. If a gain exists only in a third-party
+  binary, leave it out of our releases.
 - This overrides any "fastest path to the target" reasoning. A missed performance target
   is acceptable; a false ownership claim is not.
 
