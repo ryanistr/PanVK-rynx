@@ -54,3 +54,18 @@ cd /mnt/mainline/DroidDeck && tools/build_local.sh
 If the release is missing, `tools/build_local.sh` fails at `gh release download` rather than
 fetching stale data. To roll back temporarily, set `PANVK_REPO=ryanistr/DroidDeck-Mali` in
 `tools/panvk/release.env`.
+
+
+## 4. Future patch releases (consumers monitor these)
+
+Patches are published by dispatching `.github/workflows/release.yml` from this repo. For
+example, p8 was published with:
+
+```sh
+gh workflow run release.yml -R ryanistr/PanVK-rynx -f version=1.2.0 -f tag=PanVK-rynx-1.2.0-p8
+```
+
+The workflow builds `build.sh` on `ubuntu-24.04-arm` and publishes `PanVK-rynx-<tag>.tzst`
+plus its `.sha256` as a non-latest, non-prerelease release. After it completes, update
+`release.env` here and the consumer pin in `DroidDeck/tools/panvk/release.env` to the new
+tag and sha256. p7 was migrated unmodified from the old home; p8 onward are built here.
