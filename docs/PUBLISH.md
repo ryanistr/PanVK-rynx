@@ -69,3 +69,8 @@ The workflow builds `build.sh` on `ubuntu-24.04-arm` and publishes `PanVK-rynx-<
 plus its `.sha256` as a non-latest, non-prerelease release. After it completes, update
 `release.env` here and the consumer pin in `DroidDeck/tools/panvk/release.env` to the new
 tag and sha256. p7 was migrated unmodified from the old home; p8 onward are built here.
+
+DroidDeck also runs `.github/workflows/monitor-panvk-release.yml` every 6 hours (and on
+manual dispatch). It finds the newest published `PanVK-rynx-<version>-p<n>` release in this
+repo, reads its `.sha256` asset, and opens a PR in DroidDeck when the tag or checksum no
+longer matches `tools/panvk/release.env`. It never builds or publishes a driver itself.
