@@ -1,4 +1,4 @@
-From 45a303bd9c133495acb76d4f6d95d7137ae32eb5 Mon Sep 17 00:00:00 2001
+From da385e4b1e722358c8f0b3d7075bafac8ed896a2 Mon Sep 17 00:00:00 2001
 From: PanVK-rynx <panvk@local>
 Date: Sat, 21 Nov 2026 19:50:30 +0700
 Subject: [PATCH] panvk: enable subpass merging, inline vtc ubo push, and
@@ -9,14 +9,14 @@ Subject: [PATCH] panvk: enable subpass merging, inline vtc ubo push, and
  src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c  | 135 +++++++--
  src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c   |  78 +++---
  src/panfrost/vulkan/panvk_device.h            |   9 +
- src/panfrost/vulkan/panvk_vX_cmd_meta.c       |  12 +
+ src/panfrost/vulkan/panvk_vX_cmd_meta.c       |  13 +
  src/panfrost/vulkan/panvk_vX_device.c         |   4 +
  .../vulkan/panvk_vX_physical_device.c         |   3 +
  src/vulkan/runtime/vk_command_buffer.h        |   2 +
  src/vulkan/runtime/vk_graphics_state.c        |   4 +-
  src/vulkan/runtime/vk_render_pass.c           | 264 ++++++++++++++++++
  src/vulkan/runtime/vk_render_pass.h           |  27 ++
- 11 files changed, 478 insertions(+), 70 deletions(-)
+ 11 files changed, 479 insertions(+), 70 deletions(-)
 
 diff --git a/src/panfrost/vulkan/jm/panvk_cmd_buffer.h b/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
 index 7827a51..2be186a 100644
@@ -381,10 +381,18 @@ index 0801fa8..146a098 100644
        struct pandecode_context *decode_ctx;
     } debug;
 diff --git a/src/panfrost/vulkan/panvk_vX_cmd_meta.c b/src/panfrost/vulkan/panvk_vX_cmd_meta.c
-index 0255f17..380cddc 100644
+index 0255f17..01e8d3d 100644
 --- a/src/panfrost/vulkan/panvk_vX_cmd_meta.c
 +++ b/src/panfrost/vulkan/panvk_vX_cmd_meta.c
-@@ -381,6 +381,18 @@ panvk_per_arch(CmdClearAttachments)(VkCommandBuffer commandBuffer,
+@@ -9,6 +9,7 @@
+ #include "panvk_entrypoints.h"
+ #include "panvk_meta.h"
+ #include "panvk_tracepoints.h"
++#include "vk_render_pass.h"
+ #include "util/os_time.h"
+ #if PAN_ARCH >= 10
+ #include "csf/panvk_instr.h"
+@@ -381,6 +382,18 @@ panvk_per_arch(CmdClearAttachments)(VkCommandBuffer commandBuffer,
     cmdbuf->state.cond_render.enabled = save.cond_render_enabled;
     cmdbuf->state.cond_render.inherited = save.cond_render_inherited;
  #endif
