@@ -1,0 +1,68 @@
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+index 9490d42..52d5b3b 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+@@ -97,7 +97,7 @@ static void cmd_close_batch_impl(struct panvk_cmd_buffer *cmdbuf);
+ void
+ panvk_per_arch(cmd_close_batch)(struct panvk_cmd_buffer *cmdbuf)
+ {
+-#if PAN_ARCH < 9
++#if PAN_ARCH <= 9
+    /* jm-v7 100: availability of the occlusion queries ended in this batch,
+     * in an after_frag batch of its own so it follows the fragment job that
+     * finished counting.
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c
+index 4d88ee7..46195d0 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c
+@@ -68,7 +68,7 @@ static struct panvk_batch *
+ open_batch_flags(struct panvk_cmd_buffer *cmd, bool *had_batch,
+                  bool after_frag)
+ {
+-#if PAN_ARCH < 9
++#if PAN_ARCH <= 9
+    /* jm-v7 100: deferred occlusion ends become available before any
+     * timestamp, copy, reset or non-deferred end that follows them.
+     */
+@@ -381,7 +381,7 @@ panvk_per_arch(CmdEndQueryIndexedEXT)(VkCommandBuffer commandBuffer,
+    VK_FROM_HANDLE(panvk_cmd_buffer, cmd, commandBuffer);
+    VK_FROM_HANDLE(panvk_query_pool, pool, queryPool);
+ 
+-#if PAN_ARCH < 9
++#if PAN_ARCH <= 9
+    /* jm-v7 100: an occlusion query ended in an open batch (usually the
+     * render pass batch holding its draws) no longer splits it. Draws count
+     * through their own DCD pointer, so turning the counter off here is
+diff --git a/src/panfrost/vulkan/panvk_cmd_draw.h b/src/panfrost/vulkan/panvk_cmd_draw.h
+index 5947c04..09b5837 100644
+--- a/src/panfrost/vulkan/panvk_cmd_draw.h
++++ b/src/panfrost/vulkan/panvk_cmd_draw.h
+@@ -194,10 +194,12 @@ struct panvk_cmd_graphics_state {
+     */
+    uint32_t v7_dirty_sets;
+    bool v7_dirty_sets_valid;
++#endif
++#if PAN_ARCH <= 9
+    /* jm-v7 100: availability words of occlusion queries ended in the
+     * current batch, written once it closes (after its fragment job).
+     */
+-#define PANVK_V7_MAX_DEFERRED_QUERY_ENDS 64
++#define PANVK_V7_MAX_DEFERRED_QUERY_ENDS 256
+    uint64_t v7_query_ends[PANVK_V7_MAX_DEFERRED_QUERY_ENDS];
+    uint32_t v7_query_end_count;
+ #endif
+diff --git a/src/panfrost/vulkan/panvk_physical_device.c b/src/panfrost/vulkan/panvk_physical_device.c
+index 6785fef..c03fdd2 100644
+--- a/src/panfrost/vulkan/panvk_physical_device.c
++++ b/src/panfrost/vulkan/panvk_physical_device.c
+@@ -1127,8 +1127,8 @@ kbase_cpu_sync_export_sync_file(struct vk_device *device,
+       }
+       mtx_unlock(&ks->mutex);
+       if (jm_count > 0) {
+-         for (unsigned i = 0; i + 1 < jm_count; i++)
+-            kbase_kmod_wait_atom(dev->kmod.dev, jm_targets[i], -1);
++         /* Atoms on a JM queue are strictly ordered; chaining only the last
++          * atom avoids stalling the CPU on earlier batches during present. */
+          int jfd = kbase_kmod_jm_fence_after(dev->kmod.dev, jm_targets[jm_count - 1]);
+          if (jfd >= 0) {
+             *sync_file = jfd;
