@@ -1,4 +1,4 @@
-From 13677f422cafec6c6181795e346cc0cbec6a6101 Mon Sep 17 00:00:00 2001
+From 45a303bd9c133495acb76d4f6d95d7137ae32eb5 Mon Sep 17 00:00:00 2001
 From: PanVK-rynx <panvk@local>
 Date: Sat, 21 Nov 2026 19:50:30 +0700
 Subject: [PATCH] panvk: enable subpass merging, inline vtc ubo push, and
@@ -11,12 +11,12 @@ Subject: [PATCH] panvk: enable subpass merging, inline vtc ubo push, and
  src/panfrost/vulkan/panvk_device.h            |   9 +
  src/panfrost/vulkan/panvk_vX_cmd_meta.c       |  12 +
  src/panfrost/vulkan/panvk_vX_device.c         |   4 +
- .../vulkan/panvk_vX_physical_device.c         |   2 +
+ .../vulkan/panvk_vX_physical_device.c         |   3 +
  src/vulkan/runtime/vk_command_buffer.h        |   2 +
  src/vulkan/runtime/vk_graphics_state.c        |   4 +-
- src/vulkan/runtime/vk_render_pass.c           | 263 ++++++++++++++++++
+ src/vulkan/runtime/vk_render_pass.c           | 264 ++++++++++++++++++
  src/vulkan/runtime/vk_render_pass.h           |  27 ++
- 11 files changed, 476 insertions(+), 70 deletions(-)
+ 11 files changed, 478 insertions(+), 70 deletions(-)
 
 diff --git a/src/panfrost/vulkan/jm/panvk_cmd_buffer.h b/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
 index 7827a51..2be186a 100644
@@ -426,10 +426,18 @@ index 146fe16..cfc1752 100644
        debug_get_bool_option("PANVK_CS_FLUSH_USED", true);
     device->cmdbuf_opt.jm_pool_autotrim =
 diff --git a/src/panfrost/vulkan/panvk_vX_physical_device.c b/src/panfrost/vulkan/panvk_vX_physical_device.c
-index 777eb25..34aaacf 100644
+index 777eb25..0aec8f1 100644
 --- a/src/panfrost/vulkan/panvk_vX_physical_device.c
 +++ b/src/panfrost/vulkan/panvk_vX_physical_device.c
-@@ -308,6 +308,8 @@ panvk_per_arch(get_physical_device_features)(
+@@ -17,6 +17,7 @@
+ #include "vk_android.h"
+ #include "vk_device.h"
+ #include "vk_limits.h"
++#include "vk_render_pass.h"
+ #include "vk_shader_module.h"
+ 
+ #include "panvk_instance.h"
+@@ -308,6 +309,8 @@ panvk_per_arch(get_physical_device_features)(
      * Do not advertise sparse support there, otherwise CTS will exercise sparse
      * binding paths that can only fail at submit time. */
     bool has_sparse = PAN_ARCH >= 10 && !device->kbase_node_path[0];
@@ -468,10 +476,18 @@ index 6f6f0fc..0b6f01a 100644
     VkPipelineDepthStencilStateCreateInfo custom_ds_info;
     /* With VK_EXT_dynamic_rendering_unused_attachments, we must explicitly
 diff --git a/src/vulkan/runtime/vk_render_pass.c b/src/vulkan/runtime/vk_render_pass.c
-index aa3da44..a9434b7 100644
+index aa3da44..6155ece 100644
 --- a/src/vulkan/runtime/vk_render_pass.c
 +++ b/src/vulkan/runtime/vk_render_pass.c
-@@ -444,6 +444,14 @@ vk_subpass_attachment_init(struct vk_subpass_attachment *att,
+@@ -28,6 +28,7 @@
+ #include "vk_command_buffer.h"
+ #include "vk_common_entrypoints.h"
+ #include "vk_device.h"
++#include "vk_physical_device.h"
+ #include "vk_format.h"
+ #include "vk_framebuffer.h"
+ #include "vk_image.h"
+@@ -444,6 +445,14 @@ vk_subpass_attachment_init(struct vk_subpass_attachment *att,
     }
  }
  
@@ -486,7 +502,7 @@ index aa3da44..a9434b7 100644
  static void
  vk_subpass_attachment_link_resolve(struct vk_subpass_attachment *att,
                                     struct vk_subpass_attachment *resolve,
-@@ -456,6 +464,209 @@ vk_subpass_attachment_link_resolve(struct vk_subpass_attachment *att,
+@@ -456,6 +465,209 @@ vk_subpass_attachment_link_resolve(struct vk_subpass_attachment *att,
     att->resolve = resolve;
  }
  
@@ -696,7 +712,7 @@ index aa3da44..a9434b7 100644
  VKAPI_ATTR VkResult VKAPI_CALL
  vk_common_CreateRenderPass2(VkDevice _device,
                              const VkRenderPassCreateInfo2 *pCreateInfo,
-@@ -961,6 +1172,8 @@ vk_common_CreateRenderPass2(VkDevice _device,
+@@ -961,6 +1173,8 @@ vk_common_CreateRenderPass2(VkDevice _device,
        pass->fragment_density_map.layout = VK_IMAGE_LAYOUT_UNDEFINED;
     }
  
@@ -705,7 +721,7 @@ index aa3da44..a9434b7 100644
     *pRenderPass = vk_render_pass_to_handle(pass);
  
     return VK_SUCCESS;
-@@ -972,6 +1185,8 @@ vk_get_pipeline_rendering_create_info(const VkGraphicsPipelineCreateInfo *info)
+@@ -972,6 +1186,8 @@ vk_get_pipeline_rendering_create_info(const VkGraphicsPipelineCreateInfo *info)
     VK_FROM_HANDLE(vk_render_pass, render_pass, info->renderPass);
     if (render_pass != NULL) {
        assert(info->subpass < render_pass->subpass_count);
@@ -714,7 +730,7 @@ index aa3da44..a9434b7 100644
        return &render_pass->subpasses[info->subpass].pipeline_info;
     }
  
-@@ -984,6 +1199,8 @@ vk_get_pipeline_rendering_ial_info(const VkGraphicsPipelineCreateInfo *info)
+@@ -984,6 +1200,8 @@ vk_get_pipeline_rendering_ial_info(const VkGraphicsPipelineCreateInfo *info)
     VK_FROM_HANDLE(vk_render_pass, render_pass, info->renderPass);
     if (render_pass != NULL) {
        assert(info->subpass < render_pass->subpass_count);
@@ -723,7 +739,7 @@ index aa3da44..a9434b7 100644
        return &render_pass->subpasses[info->subpass].ial.info;
     }
  
-@@ -991,6 +1208,39 @@ vk_get_pipeline_rendering_ial_info(const VkGraphicsPipelineCreateInfo *info)
+@@ -991,6 +1209,39 @@ vk_get_pipeline_rendering_ial_info(const VkGraphicsPipelineCreateInfo *info)
                                 RENDERING_INPUT_ATTACHMENT_INDEX_INFO_KHR);
  }
  
@@ -763,7 +779,7 @@ index aa3da44..a9434b7 100644
  VkPipelineCreateFlags2KHR
  vk_get_pipeline_rendering_flags(const VkGraphicsPipelineCreateInfo *info)
  {
-@@ -1281,6 +1531,8 @@ vk_common_DestroyRenderPass(VkDevice _device,
+@@ -1281,6 +1532,8 @@ vk_common_DestroyRenderPass(VkDevice _device,
     if (!pass)
        return;
  
@@ -772,7 +788,7 @@ index aa3da44..a9434b7 100644
     vk_object_free(device, pAllocator, pass);
  }
  
-@@ -2646,6 +2898,10 @@ vk_common_CmdBeginRenderPass2(VkCommandBuffer commandBuffer,
+@@ -2646,6 +2899,10 @@ vk_common_CmdBeginRenderPass2(VkCommandBuffer commandBuffer,
                    pRenderPassBeginInfo->framebuffer);
  
     assert(cmd_buffer->render_pass == NULL);
@@ -783,7 +799,7 @@ index aa3da44..a9434b7 100644
     cmd_buffer->render_pass = pass;
     cmd_buffer->subpass_idx = 0;
  
-@@ -2795,7 +3051,9 @@ void
+@@ -2795,7 +3052,9 @@ void
  vk_command_buffer_reset_render_pass(struct vk_command_buffer *cmd_buffer)
  {
     cmd_buffer->render_pass = NULL;
@@ -793,7 +809,7 @@ index aa3da44..a9434b7 100644
     cmd_buffer->framebuffer = NULL;
     if (cmd_buffer->attachments != cmd_buffer->_attachments)
        free(cmd_buffer->attachments);
-@@ -2812,6 +3070,11 @@ vk_common_CmdNextSubpass2(VkCommandBuffer commandBuffer,
+@@ -2812,6 +3071,11 @@ vk_common_CmdNextSubpass2(VkCommandBuffer commandBuffer,
  {
     VK_FROM_HANDLE(vk_command_buffer, cmd_buffer, commandBuffer);
  
