@@ -1,0 +1,867 @@
+From 13677f422cafec6c6181795e346cc0cbec6a6101 Mon Sep 17 00:00:00 2001
+From: PanVK-rynx <panvk@local>
+Date: Sat, 21 Nov 2026 19:50:30 +0700
+Subject: [PATCH] panvk: enable subpass merging, inline vtc ubo push, and
+ device tls reuse
+
+---
+ src/panfrost/vulkan/jm/panvk_cmd_buffer.h     |  10 +-
+ src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c  | 135 +++++++--
+ src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c   |  78 +++---
+ src/panfrost/vulkan/panvk_device.h            |   9 +
+ src/panfrost/vulkan/panvk_vX_cmd_meta.c       |  12 +
+ src/panfrost/vulkan/panvk_vX_device.c         |   4 +
+ .../vulkan/panvk_vX_physical_device.c         |   2 +
+ src/vulkan/runtime/vk_command_buffer.h        |   2 +
+ src/vulkan/runtime/vk_graphics_state.c        |   4 +-
+ src/vulkan/runtime/vk_render_pass.c           | 263 ++++++++++++++++++
+ src/vulkan/runtime/vk_render_pass.h           |  27 ++
+ 11 files changed, 476 insertions(+), 70 deletions(-)
+
+diff --git a/src/panfrost/vulkan/jm/panvk_cmd_buffer.h b/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
+index 7827a51..2be186a 100644
+--- a/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
++++ b/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
+@@ -46,6 +46,7 @@ struct panvk_batch {
+    struct util_dynarray malloc_vertex_jobs;
+    struct util_dynarray ubo_push_pairs;
+    struct pan_jc ubo_push_jc;
++   bool ubo_push_after_frag;
+ #endif
+    /* The vertex/tiler chain writes SYSTEM_TIMESTAMP values (v9, and v6/v7
+     * since jm-v7 021). */
+@@ -124,7 +125,10 @@ struct panvk_cmd_buffer {
+    struct {
+       uint64_t tls_ptr, wls_ptr;
+       uint64_t tls_size, wls_size;
++      uint32_t tls_stack_size;
+    } tls_half[2];
++   struct panvk_priv_bo *dev_tls_bos[8];
++   uint32_t dev_tls_bo_count;
+    struct list_head batches;
+    struct list_head push_sets;
+    struct panvk_batch *cur_batch;
+@@ -152,12 +156,8 @@ struct panvk_cmd_buffer {
+       } cond_render;
+ #endif
+ #if PAN_ARCH == 9
+-      /* jm-v7 118: instances before the CPU split chunk being lowered
+-       * (v9_prerast_draw_split()). The chunk keeps the API firstInstance and
+-       * the lowered VS adds this to its instance IDs, as CSF
+-       * gpu_prerast_inst_base (csf-v11 191).
+-       */
+       uint32_t gpu_prerast_inst_base;
++      bool ubo_push_after_frag;
+ #endif
+       bool pending_fb_barrier;
+    } state;
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+index 52d5b3b..a96f019 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+@@ -183,21 +183,23 @@ cmd_close_batch_impl(struct panvk_cmd_buffer *cmdbuf)
+    const uint32_t ubo_pair_count =
+       util_dynarray_num_elements(&batch->ubo_push_pairs,
+                                  struct panvk_ubo_push_pair);
+-   if (ubo_pair_count && batch->fb.desc.cpu &&
+-       (batch->vtc_jc.first_tiler || cmdbuf->state.gfx.render.fb.needs_store)) {
++   if (ubo_pair_count) {
+       struct pan_ptr pairs = panvk_cmd_alloc_dev_mem(
+          cmdbuf, desc, ubo_pair_count * sizeof(struct panvk_ubo_push_pair), 8);
+       if (pairs.gpu) {
+          memcpy(pairs.cpu, batch->ubo_push_pairs.data,
+                 ubo_pair_count * sizeof(struct panvk_ubo_push_pair));
+          struct pan_jc saved_vtc = batch->vtc_jc;
+-         batch->vtc_jc = batch->ubo_push_jc;
++         if (batch->ubo_push_after_frag)
++            batch->vtc_jc = batch->ubo_push_jc;
+          struct panvk_precomp_ctx pctx = panvk_per_arch(precomp_cs)(cmdbuf);
+          panlib_v9_ubo_push_copy32(
+             &pctx, panlib_1d(DIV_ROUND_UP(ubo_pair_count, 32)),
+             PANLIB_BARRIER_JM_BARRIER, pairs.gpu, ubo_pair_count);
+-         batch->ubo_push_jc = batch->vtc_jc;
+-         batch->vtc_jc = saved_vtc;
++         if (batch->ubo_push_after_frag) {
++            batch->ubo_push_jc = batch->vtc_jc;
++            batch->vtc_jc = saved_vtc;
++         }
+       }
+    }
+ #endif
+@@ -210,24 +212,72 @@ cmd_close_batch_impl(struct panvk_cmd_buffer *cmdbuf)
+ 
+       unsigned size = pan_get_total_stack_size(batch->tlsinfo.tls.size,
+                                                thread_tls_alloc, core_id_range);
+-      /* jm-v7 107: reuse this half's buffer when it is large enough. */
+       const unsigned h = batch->heap_half & 1;
+-      if (panvk_v7_tls_share() && cmdbuf->tls_half[h].tls_ptr &&
+-          cmdbuf->tls_half[h].tls_size >= size) {
+-         batch->tlsinfo.tls.ptr = cmdbuf->tls_half[h].tls_ptr;
+-      } else {
+-         batch->tlsinfo.tls.ptr = panvk_cmd_alloc_tls_mem(cmdbuf, size);
+-         if (batch->tlsinfo.tls.ptr) {
+-            cmdbuf->tls_half[h].tls_ptr = batch->tlsinfo.tls.ptr;
+-            cmdbuf->tls_half[h].tls_size = size;
++      static int tls_device = -1;
++      if (tls_device < 0) {
++         const char *e = os_get_option("PANVK_TLS_DEVICE");
++         tls_device = !(e && e[0] == '0');
++      }
++      bool allocated_dev_tls = false;
++      if (tls_device && panvk_v7_tls_share()) {
++         if (cmdbuf->tls_half[h].tls_ptr &&
++             cmdbuf->tls_half[h].tls_size >= size) {
++            batch->tlsinfo.tls.ptr = cmdbuf->tls_half[h].tls_ptr;
++            if (batch->tlsinfo.tls.size < cmdbuf->tls_half[h].tls_stack_size)
++               batch->tlsinfo.tls.size = cmdbuf->tls_half[h].tls_stack_size;
++            allocated_dev_tls = true;
++         } else {
++            simple_mtx_lock(&dev->jm_tls.lock);
++            if (!dev->jm_tls.half[h].bo || dev->jm_tls.half[h].size < size) {
++               uint32_t flags = panvk_device_adjust_bo_flags(
++                  dev, PAN_KMOD_BO_FLAG_NO_MMAP | PAN_KMOD_BO_FLAG_NO_ZERO);
++               struct panvk_priv_bo *new_bo = NULL;
++               if (panvk_priv_bo_create(dev, size, flags,
++                                        VK_SYSTEM_ALLOCATION_SCOPE_DEVICE,
++                                        &new_bo) == VK_SUCCESS) {
++                  panvk_priv_bo_unref(dev->jm_tls.half[h].bo);
++                  dev->jm_tls.half[h].bo = new_bo;
++                  dev->jm_tls.half[h].size = size;
++                  dev->jm_tls.half[h].stack_size = batch->tlsinfo.tls.size;
++               }
++            }
++            struct panvk_priv_bo *bo = dev->jm_tls.half[h].bo;
++            if (bo && dev->jm_tls.half[h].size >= size &&
++                cmdbuf->dev_tls_bo_count < ARRAY_SIZE(cmdbuf->dev_tls_bos)) {
++               bool held = false;
++               for (uint32_t i = 0; i < cmdbuf->dev_tls_bo_count; i++) {
++                  if (cmdbuf->dev_tls_bos[i] == bo) {
++                     held = true;
++                     break;
++                  }
++               }
++               if (!held)
++                  cmdbuf->dev_tls_bos[cmdbuf->dev_tls_bo_count++] =
++                     panvk_priv_bo_ref(bo);
++               batch->tlsinfo.tls.ptr = bo->addr.dev;
++               if (batch->tlsinfo.tls.size < dev->jm_tls.half[h].stack_size)
++                  batch->tlsinfo.tls.size = dev->jm_tls.half[h].stack_size;
++               cmdbuf->tls_half[h].tls_ptr = bo->addr.dev;
++               cmdbuf->tls_half[h].tls_size = dev->jm_tls.half[h].size;
++               cmdbuf->tls_half[h].tls_stack_size = batch->tlsinfo.tls.size;
++               allocated_dev_tls = true;
++            }
++            simple_mtx_unlock(&dev->jm_tls.lock);
+          }
+-         static unsigned tls_logged;
+-         if (tls_logged < 4) {
+-            tls_logged++;
+-            mesa_logi("panvk: v%u batch TLS %u KiB (stack %u B/thread), "
+-                      "half %u%s", PAN_ARCH, size >> 10,
+-                      batch->tlsinfo.tls.size, h,
+-                      panvk_v7_tls_share() ? ", shared per half" : "");
++      }
++      if (!allocated_dev_tls) {
++         if (panvk_v7_tls_share() && cmdbuf->tls_half[h].tls_ptr &&
++             cmdbuf->tls_half[h].tls_size >= size) {
++            batch->tlsinfo.tls.ptr = cmdbuf->tls_half[h].tls_ptr;
++            if (batch->tlsinfo.tls.size < cmdbuf->tls_half[h].tls_stack_size)
++               batch->tlsinfo.tls.size = cmdbuf->tls_half[h].tls_stack_size;
++         } else {
++            batch->tlsinfo.tls.ptr = panvk_cmd_alloc_tls_mem(cmdbuf, size);
++            if (batch->tlsinfo.tls.ptr) {
++               cmdbuf->tls_half[h].tls_ptr = batch->tlsinfo.tls.ptr;
++               cmdbuf->tls_half[h].tls_size = size;
++               cmdbuf->tls_half[h].tls_stack_size = batch->tlsinfo.tls.size;
++            }
+          }
+       }
+    }
+@@ -538,6 +588,8 @@ panvk_per_arch(cmd_open_batch)(struct panvk_cmd_buffer *cmdbuf)
+ #if PAN_ARCH == 9
+    cmdbuf->cur_batch->malloc_vertex_jobs = UTIL_DYNARRAY_INIT;
+    cmdbuf->cur_batch->ubo_push_pairs = UTIL_DYNARRAY_INIT;
++   cmdbuf->cur_batch->ubo_push_after_frag = cmdbuf->state.ubo_push_after_frag;
++   cmdbuf->state.ubo_push_after_frag = false;
+ #endif
+    cmdbuf->cur_batch->event_ops = UTIL_DYNARRAY_INIT;
+    cmdbuf->cur_batch->vary_infos = UTIL_DYNARRAY_INIT;
+@@ -598,6 +650,38 @@ panvk_per_arch(CmdPipelineBarrier2)(VkCommandBuffer commandBuffer,
+ 
+    if (cmdbuf->cur_batch && !is_fb_local) {
+       panvk_per_arch(cmd_close_batch)(cmdbuf);
++#if PAN_ARCH == 9
++      for (uint32_t i = 0; i < pDependencyInfo->memoryBarrierCount; i++) {
++         if (pDependencyInfo->pMemoryBarriers[i].srcStageMask &
++             (VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
++              VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
++              VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT |
++              VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT |
++              VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT |
++              VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT)) {
++            if (pDependencyInfo->pMemoryBarriers[i].dstAccessMask &
++                (VK_ACCESS_2_UNIFORM_READ_BIT |
++                 VK_ACCESS_2_SHADER_READ_BIT |
++                 VK_ACCESS_2_MEMORY_READ_BIT))
++               cmdbuf->state.ubo_push_after_frag = true;
++         }
++      }
++      for (uint32_t i = 0; i < pDependencyInfo->bufferMemoryBarrierCount; i++) {
++         if (pDependencyInfo->pBufferMemoryBarriers[i].srcStageMask &
++             (VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
++              VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
++              VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT |
++              VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT |
++              VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT |
++              VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT)) {
++            if (pDependencyInfo->pBufferMemoryBarriers[i].dstAccessMask &
++                (VK_ACCESS_2_UNIFORM_READ_BIT |
++                 VK_ACCESS_2_SHADER_READ_BIT |
++                 VK_ACCESS_2_MEMORY_READ_BIT))
++               cmdbuf->state.ubo_push_after_frag = true;
++         }
++      }
++#endif
+       panvk_per_arch(cmd_open_batch)(cmdbuf);
+    } else if (is_fb_local) {
+       cmdbuf->state.pending_fb_barrier = true;
+@@ -633,6 +717,9 @@ panvk_reset_cmdbuf(struct vk_command_buffer *vk_cmdbuf,
+       vk_free(&cmdbuf->vk.pool->alloc, batch);
+    }
+ 
++   for (uint32_t i = 0; i < cmdbuf->dev_tls_bo_count; i++)
++      panvk_priv_bo_unref(cmdbuf->dev_tls_bos[i]);
++   cmdbuf->dev_tls_bo_count = 0;
+    panvk_pool_reset(&cmdbuf->desc_pool);
+    panvk_pool_reset(&cmdbuf->tls_pool);
+    memset(cmdbuf->tls_half, 0, sizeof(cmdbuf->tls_half));
+@@ -667,6 +754,9 @@ panvk_destroy_cmdbuf(struct vk_command_buffer *vk_cmdbuf)
+    panvk_shader_link_cleanup(&cmdbuf->state.gfx.link);
+ #endif
+ 
++   for (uint32_t i = 0; i < cmdbuf->dev_tls_bo_count; i++)
++      panvk_priv_bo_unref(cmdbuf->dev_tls_bos[i]);
++   cmdbuf->dev_tls_bo_count = 0;
+    panvk_pool_cleanup(&cmdbuf->desc_pool);
+    panvk_pool_cleanup(&cmdbuf->tls_pool);
+    panvk_pool_cleanup(&cmdbuf->varying_pool);
+@@ -788,6 +878,9 @@ panvk_per_arch(BeginCommandBuffer)(VkCommandBuffer commandBuffer,
+    cmdbuf->one_time_submit =
+       cmdbuf->vk.level == VK_COMMAND_BUFFER_LEVEL_PRIMARY &&
+       (pBeginInfo->flags & VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
++#if PAN_ARCH == 9
++   cmdbuf->state.ubo_push_after_frag = !cmdbuf->one_time_submit;
++#endif
+ 
+    return VK_SUCCESS;
+ }
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
+index 6f9735c..8457134 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
+@@ -212,32 +212,43 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
+             queue->last_vtc_atom = vtc_atom; /* v67b */
+             queue->in_dep = 0;
+             queue->last_any_atom = vtc_atom;
+-
+-      if (PANVK_DEBUG(TRACE) || PANVK_DEBUG(SYNC)) {
+-         ASSERTED bool done =
+-            P4_WAIT(dev->kmod.dev, vtc_atom, -1);
+-         assert(done);
+-            vtc_atom = 0; /* already waited+consumed above; don't wait again in wait_one() */
+-
+-         /* If we want to read the descriptors back, we need to invalidate the
+-          * whole desc pool, otherwise we might end up with stale data. */
+-         panvk_pool_invalidate_maps(&cmdbuf->desc_pool);
+-         pan_kmod_flush_bo_map_syncs(dev->kmod.dev);
+-      }
+-
+-      if (PANVK_DEBUG(TRACE)) {
+-         /* skip pandecode_jc */
+-      }
+-
+-      if (PANVK_DEBUG(DUMP))
+-         pandecode_dump_mappings(dev->debug.decode_ctx);
+-
+-      if (PANVK_DEBUG(SYNC))
+-         pandecode_abort_on_fault(dev->debug.decode_ctx, batch->vtc_jc.first_job,
+-                                  phys_dev->kmod.dev->props.gpu_id);
+-   
+          } /* end !warmed_up else */
++   }
++
++#if PAN_ARCH == 9
++   if (batch->ubo_push_jc.first_job) {
++      if (unlikely(!queue->warmed_up)) {
++         if (queue->in_dep) {
++            kbase_kmod_wait_atom(dev->kmod.dev, queue->in_dep, -1);
++            queue->in_dep = 0;
++         }
++         kbase_kmod_job_submit_retry(
++            dev->kmod.dev, batch->ubo_push_jc.first_job, BASE_JD_REQ_CS,
++            bos, nr_bos, NULL, 0, 5);
++         queue->warmed_up = true;
++      } else {
++         uint64_t ubo_dep0 = vtc_atom ? vtc_atom : queue->last_any_atom;
++         uint8_t ubo_dep0_type =
++            vtc_atom ? BASE_JD_DEP_TYPE_DATA
++                     : dep_type(queue, queue->last_any_atom);
++         uint64_t ubo_dep1 =
++            queue->last_frag_atom ? queue->last_frag_atom : queue->in_dep;
++         uint8_t ubo_dep1_type =
++            queue->last_frag_atom ? dep_type(queue, queue->last_frag_atom)
++                                  : BASE_JD_DEP_TYPE_ORDER;
++         uint64_t ubo_atom = kbase_kmod_job_submit_dep(
++            dev->kmod.dev, batch->ubo_push_jc.first_job, BASE_JD_REQ_CS,
++            bos, nr_bos, ubo_dep0, ubo_dep0_type, ubo_dep1, ubo_dep1_type,
++            batch->frag_jc.first_job != 0 && queue->frag_warmed_up);
++         assert(ubo_atom);
++         note_submitted(queue, ubo_atom);
++         vtc_atom = ubo_atom;
++         queue->last_vtc_atom = ubo_atom;
++         queue->last_any_atom = ubo_atom;
++         queue->in_dep = 0;
+       }
++   }
++#endif
+ 
+    if (batch->frag_jc.first_job) {
+       /* The fragment job depends on the vertex/tiler job. kbase atoms can't
+@@ -257,13 +268,6 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
+             kbase_kmod_wait_atom(dev->kmod.dev, queue->in_dep, -1);
+             queue->in_dep = 0;
+          }
+-#if PAN_ARCH == 9
+-         if (batch->ubo_push_jc.first_job) {
+-            kbase_kmod_job_submit_retry(
+-               dev->kmod.dev, batch->ubo_push_jc.first_job, BASE_JD_REQ_CS,
+-               bos, nr_bos, NULL, 0, 5);
+-         }
+-#endif
+          (void)0;
+          bool ok = kbase_kmod_job_submit_retry(
+             dev->kmod.dev, batch->frag_jc.first_job, BASE_JD_REQ_FS,
+@@ -278,18 +282,6 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
+          uint8_t frag_dep0_type =
+             vtc_atom ? BASE_JD_DEP_TYPE_DATA
+                      : dep_type(queue, queue->last_any_atom);
+-#if PAN_ARCH == 9
+-         if (batch->ubo_push_jc.first_job) {
+-            uint64_t ubo_atom = kbase_kmod_job_submit_dep(
+-               dev->kmod.dev, batch->ubo_push_jc.first_job, BASE_JD_REQ_CS,
+-               bos, nr_bos, frag_dep0, frag_dep0_type, queue->last_frag_atom,
+-               dep_type(queue, queue->last_frag_atom), true);
+-            assert(ubo_atom);
+-            note_submitted(queue, ubo_atom);
+-            frag_dep0 = ubo_atom;
+-            frag_dep0_type = BASE_JD_DEP_TYPE_DATA;
+-         }
+-#endif
+          frag_atom = kbase_kmod_job_submit_dep(dev->kmod.dev, batch->frag_jc.first_job,
+                                              BASE_JD_REQ_FS, bos, nr_bos,
+                                              frag_dep0, frag_dep0_type,
+diff --git a/src/panfrost/vulkan/panvk_device.h b/src/panfrost/vulkan/panvk_device.h
+index 0801fa8..146a098 100644
+--- a/src/panfrost/vulkan/panvk_device.h
++++ b/src/panfrost/vulkan/panvk_device.h
+@@ -272,6 +272,15 @@ struct panvk_device {
+       struct util_dynarray bos;
+    } tls;
+ 
++   struct {
++      simple_mtx_t lock;
++      struct {
++         struct panvk_priv_bo *bo;
++         uint64_t size;
++         uint32_t stack_size;
++      } half[2];
++   } jm_tls;
++
+    struct {
+       struct pandecode_context *decode_ctx;
+    } debug;
+diff --git a/src/panfrost/vulkan/panvk_vX_cmd_meta.c b/src/panfrost/vulkan/panvk_vX_cmd_meta.c
+index 0255f17..380cddc 100644
+--- a/src/panfrost/vulkan/panvk_vX_cmd_meta.c
++++ b/src/panfrost/vulkan/panvk_vX_cmd_meta.c
+@@ -381,6 +381,18 @@ panvk_per_arch(CmdClearAttachments)(VkCommandBuffer commandBuffer,
+    cmdbuf->state.cond_render.enabled = save.cond_render_enabled;
+    cmdbuf->state.cond_render.inherited = save.cond_render_inherited;
+ #endif
++   VkClearAttachment remapped_atts[MAX_RTS + 2];
++   if (attachmentCount <= ARRAY_SIZE(remapped_atts)) {
++      for (uint32_t i = 0; i < attachmentCount; i++) {
++         remapped_atts[i] = pAttachments[i];
++         if (remapped_atts[i].aspectMask & VK_IMAGE_ASPECT_COLOR_BIT) {
++            remapped_atts[i].colorAttachment =
++               vk_command_buffer_color_attachment_index(
++                  &cmdbuf->vk, remapped_atts[i].colorAttachment);
++         }
++      }
++      pAttachments = remapped_atts;
++   }
+    vk_meta_clear_attachments(&cmdbuf->vk, &dev->meta, &render, attachmentCount,
+                              pAttachments, rectCount, pRects);
+    meta_gfx_end(cmdbuf, &save);
+diff --git a/src/panfrost/vulkan/panvk_vX_device.c b/src/panfrost/vulkan/panvk_vX_device.c
+index 146fe16..cfc1752 100644
+--- a/src/panfrost/vulkan/panvk_vX_device.c
++++ b/src/panfrost/vulkan/panvk_vX_device.c
+@@ -136,6 +136,9 @@ panvk_device_cleanup_tls(struct panvk_device *dev)
+       panvk_priv_bo_unref(*bo);
+    util_dynarray_fini(&dev->tls.bos);
+    simple_mtx_destroy(&dev->tls.lock);
++   for (unsigned h = 0; h < 2; h++)
++      panvk_priv_bo_unref(dev->jm_tls.half[h].bo);
++   simple_mtx_destroy(&dev->jm_tls.lock);
+ }
+ 
+ #if PAN_ARCH >= 9
+@@ -881,6 +884,7 @@ panvk_per_arch(create_device)(struct panvk_physical_device *physical_device,
+    panvk_device_init_mempools(device);
+    simple_mtx_init(&device->tls.lock, mtx_plain);
+    util_dynarray_init(&device->tls.bos, NULL);
++   simple_mtx_init(&device->jm_tls.lock, mtx_plain);
+    device->cmdbuf_opt.cs_flush_used =
+       debug_get_bool_option("PANVK_CS_FLUSH_USED", true);
+    device->cmdbuf_opt.jm_pool_autotrim =
+diff --git a/src/panfrost/vulkan/panvk_vX_physical_device.c b/src/panfrost/vulkan/panvk_vX_physical_device.c
+index 777eb25..34aaacf 100644
+--- a/src/panfrost/vulkan/panvk_vX_physical_device.c
++++ b/src/panfrost/vulkan/panvk_vX_physical_device.c
+@@ -308,6 +308,8 @@ panvk_per_arch(get_physical_device_features)(
+     * Do not advertise sparse support there, otherwise CTS will exercise sparse
+     * binding paths that can only fail at submit time. */
+    bool has_sparse = PAN_ARCH >= 10 && !device->kbase_node_path[0];
++   if (PAN_ARCH >= 9)
++      vk_render_pass_enable_subpass_merging();
+ 
+    *features = (struct vk_features){
+       /* Vulkan 1.0 */
+diff --git a/src/vulkan/runtime/vk_command_buffer.h b/src/vulkan/runtime/vk_command_buffer.h
+index ae0fec3..8ea6156 100644
+--- a/src/vulkan/runtime/vk_command_buffer.h
++++ b/src/vulkan/runtime/vk_command_buffer.h
+@@ -166,7 +166,9 @@ struct vk_command_buffer {
+    bool region_begin;
+ 
+    struct vk_render_pass *render_pass;
++   struct vk_render_pass *unmerged_render_pass;
+    uint32_t subpass_idx;
++   uint32_t unmerged_subpass_idx;
+    struct vk_framebuffer *framebuffer;
+    VkRect2D render_area;
+ 
+diff --git a/src/vulkan/runtime/vk_graphics_state.c b/src/vulkan/runtime/vk_graphics_state.c
+index 6f6f0fc..0b6f01a 100644
+--- a/src/vulkan/runtime/vk_graphics_state.c
++++ b/src/vulkan/runtime/vk_graphics_state.c
+@@ -1825,7 +1825,9 @@ vk_graphics_pipeline_state_fill(const struct vk_device *device,
+                       info->pNext, RENDERING_INPUT_ATTACHMENT_INDEX_INFO_KHR);
+ 
+    const VkRenderingAttachmentLocationInfoKHR *cal_info =
+-      vk_find_struct_const(info->pNext, RENDERING_ATTACHMENT_LOCATION_INFO_KHR);
++      !driver_rp ? vk_get_pipeline_rendering_cal_info(info)
++                 : vk_find_struct_const(info->pNext,
++                                        RENDERING_ATTACHMENT_LOCATION_INFO_KHR);
+ 
+    VkPipelineDepthStencilStateCreateInfo custom_ds_info;
+    /* With VK_EXT_dynamic_rendering_unused_attachments, we must explicitly
+diff --git a/src/vulkan/runtime/vk_render_pass.c b/src/vulkan/runtime/vk_render_pass.c
+index aa3da44..a9434b7 100644
+--- a/src/vulkan/runtime/vk_render_pass.c
++++ b/src/vulkan/runtime/vk_render_pass.c
+@@ -444,6 +444,14 @@ vk_subpass_attachment_init(struct vk_subpass_attachment *att,
+    }
+ }
+ 
++static bool vk_render_pass_merging_enabled;
++
++void
++vk_render_pass_enable_subpass_merging(void)
++{
++   vk_render_pass_merging_enabled = true;
++}
++
+ static void
+ vk_subpass_attachment_link_resolve(struct vk_subpass_attachment *att,
+                                    struct vk_subpass_attachment *resolve,
+@@ -456,6 +464,209 @@ vk_subpass_attachment_link_resolve(struct vk_subpass_attachment *att,
+    att->resolve = resolve;
+ }
+ 
++static void
++vk_try_merge_subpasses(struct vk_device *device,
++                       struct vk_render_pass *pass,
++                       const VkRenderPassCreateInfo2 *pCreateInfo,
++                       const VkAllocationCallbacks *pAllocator)
++{
++   static thread_local bool creating_merged_pass;
++   if (!vk_render_pass_merging_enabled || creating_merged_pass ||
++       pCreateInfo->subpassCount < 2 || pass->is_multiview ||
++       pass->fragment_density_map.attachment != VK_ATTACHMENT_UNUSED ||
++       !device->physical->supported_features.dynamicRenderingLocalRead ||
++       getenv("MESA_VK_NO_SUBPASS_MERGE"))
++      return;
++
++   const uint32_t max_rts =
++      MIN2(MESA_VK_MAX_COLOR_ATTACHMENTS,
++           device->physical->properties.maxColorAttachments);
++   VkAttachmentReference2 merged_colors[MESA_VK_MAX_COLOR_ATTACHMENTS];
++   uint32_t merged_color_count = 0;
++   const VkAttachmentReference2 *merged_ds = NULL;
++   uint32_t ds_att = VK_ATTACHMENT_UNUSED;
++
++   for (uint32_t s = 0; s < pCreateInfo->subpassCount; s++) {
++      const VkSubpassDescription2 *desc = &pCreateInfo->pSubpasses[s];
++      const struct vk_subpass *subpass = &pass->subpasses[s];
++      if (desc->flags != 0 || desc->viewMask != 0 ||
++          desc->pipelineBindPoint != VK_PIPELINE_BIND_POINT_GRAPHICS ||
++          desc->pNext != NULL ||
++          subpass->color_resolve_count != 0 ||
++          subpass->depth_stencil_resolve_attachment != NULL ||
++          subpass->fragment_shading_rate_attachment != NULL ||
++          subpass->mrtss.multisampledRenderToSingleSampledEnable)
++         return;
++
++      for (uint32_t c = 0; c < desc->colorAttachmentCount; c++) {
++         uint32_t att = desc->pColorAttachments[c].attachment;
++         if (att == VK_ATTACHMENT_UNUSED)
++            continue;
++         if (att >= pCreateInfo->attachmentCount ||
++             pCreateInfo->pAttachments[att].samples != VK_SAMPLE_COUNT_1_BIT)
++            return;
++
++         bool found = false;
++         for (uint32_t m = 0; m < merged_color_count; m++) {
++            if (merged_colors[m].attachment == att) {
++               found = true;
++               break;
++            }
++         }
++         if (!found) {
++            if (merged_color_count >= max_rts)
++               return;
++            merged_colors[merged_color_count++] = desc->pColorAttachments[c];
++         }
++      }
++
++      if (desc->pDepthStencilAttachment &&
++          desc->pDepthStencilAttachment->attachment != VK_ATTACHMENT_UNUSED) {
++         uint32_t att = desc->pDepthStencilAttachment->attachment;
++         if (att >= pCreateInfo->attachmentCount ||
++             pCreateInfo->pAttachments[att].samples != VK_SAMPLE_COUNT_1_BIT)
++            return;
++         if (ds_att != VK_ATTACHMENT_UNUSED && ds_att != att)
++            return;
++         ds_att = att;
++         if (!merged_ds)
++            merged_ds = desc->pDepthStencilAttachment;
++      }
++   }
++
++   VkAttachmentReference2 merged_inputs[MESA_VK_MAX_COLOR_ATTACHMENTS + 1];
++   uint32_t merged_input_count = 0;
++
++   for (uint32_t s = 0; s < pCreateInfo->subpassCount; s++) {
++      const VkSubpassDescription2 *desc = &pCreateInfo->pSubpasses[s];
++      for (uint32_t i = 0; i < desc->inputAttachmentCount; i++) {
++         uint32_t att = desc->pInputAttachments[i].attachment;
++         if (att == VK_ATTACHMENT_UNUSED)
++            continue;
++
++         bool valid = (att == ds_att);
++         for (uint32_t m = 0; m < merged_color_count && !valid; m++) {
++            if (merged_colors[m].attachment == att)
++               valid = true;
++         }
++         if (!valid)
++            return;
++
++         bool found = false;
++         for (uint32_t m = 0; m < merged_input_count; m++) {
++            if (merged_inputs[m].attachment == att) {
++               merged_inputs[m].aspectMask |=
++                  desc->pInputAttachments[i].aspectMask;
++               found = true;
++               break;
++            }
++         }
++         if (!found) {
++            if (merged_input_count >= ARRAY_SIZE(merged_inputs))
++               return;
++            merged_inputs[merged_input_count++] = desc->pInputAttachments[i];
++         }
++      }
++   }
++
++   VkSubpassDescription2 merged_subpass = {
++      .sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2,
++      .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
++      .inputAttachmentCount = merged_input_count,
++      .pInputAttachments = merged_input_count ? merged_inputs : NULL,
++      .colorAttachmentCount = merged_color_count,
++      .pColorAttachments = merged_color_count ? merged_colors : NULL,
++      .pDepthStencilAttachment = merged_ds,
++   };
++
++   VkRenderPassCreateInfo2 merged_info = {
++      .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2,
++      .pNext = pCreateInfo->pNext,
++      .flags = pCreateInfo->flags,
++      .attachmentCount = pCreateInfo->attachmentCount,
++      .pAttachments = pCreateInfo->pAttachments,
++      .subpassCount = 1,
++      .pSubpasses = &merged_subpass,
++      .dependencyCount = 0,
++      .pDependencies = NULL,
++   };
++
++   VkRenderPass merged_handle = VK_NULL_HANDLE;
++   creating_merged_pass = true;
++   VkResult res = vk_common_CreateRenderPass2(
++      vk_device_to_handle(device), &merged_info, pAllocator, &merged_handle);
++   creating_merged_pass = false;
++   if (res != VK_SUCCESS || merged_handle == VK_NULL_HANDLE)
++      return;
++
++   pass->merged = vk_render_pass_from_handle(merged_handle);
++   const struct vk_subpass *mp = &pass->merged->subpasses[0];
++
++   for (uint32_t s = 0; s < pCreateInfo->subpassCount; s++) {
++      struct vk_subpass *subpass = &pass->subpasses[s];
++      for (uint32_t m = 0; m < merged_color_count; m++) {
++         subpass->cal.colors[m] = VK_ATTACHMENT_UNUSED;
++         for (uint32_t c = 0; c < subpass->color_count; c++) {
++            if (subpass->color_attachments[c].attachment ==
++                merged_colors[m].attachment) {
++               subpass->cal.colors[m] = c;
++               break;
++            }
++         }
++
++         subpass->merged_ial.colors[m] = VK_ATTACHMENT_UNUSED;
++         for (uint32_t i = 0; i < subpass->input_count; i++) {
++            if (subpass->input_attachments[i].attachment ==
++                merged_colors[m].attachment) {
++               subpass->merged_ial.colors[m] = i;
++               break;
++            }
++         }
++      }
++
++      subpass->merged_ial.depth = VK_ATTACHMENT_UNUSED;
++      subpass->merged_ial.stencil = VK_ATTACHMENT_UNUSED;
++      if (ds_att != VK_ATTACHMENT_UNUSED) {
++         uint32_t ia_idx = VK_ATTACHMENT_UNUSED;
++         for (uint32_t i = 0; i < subpass->input_count; i++) {
++            if (subpass->input_attachments[i].attachment == ds_att) {
++               ia_idx = i;
++               break;
++            }
++         }
++         if (vk_format_has_depth(pCreateInfo->pAttachments[ds_att].format))
++            subpass->merged_ial.depth = ia_idx;
++         if (vk_format_has_stencil(pCreateInfo->pAttachments[ds_att].format))
++            subpass->merged_ial.stencil = ia_idx;
++      }
++
++      subpass->cal.info = (VkRenderingAttachmentLocationInfoKHR){
++         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_LOCATION_INFO_KHR,
++         .colorAttachmentCount = merged_color_count,
++         .pColorAttachmentLocations = subpass->cal.colors,
++      };
++
++      subpass->merged_ial.info = (VkRenderingInputAttachmentIndexInfo){
++         .sType = VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO,
++         .pNext = (void *)&mp->sample_count_info_amd,
++         .colorAttachmentCount = merged_color_count,
++         .pColorAttachmentInputIndices = subpass->merged_ial.colors,
++         .pDepthInputAttachmentIndex = &subpass->merged_ial.depth,
++         .pStencilInputAttachmentIndex = &subpass->merged_ial.stencil,
++      };
++
++      subpass->merged_pipeline_info = (VkPipelineRenderingCreateInfo){
++         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
++         .pNext = &subpass->merged_ial.info,
++         .viewMask = mp->pipeline_info.viewMask,
++         .colorAttachmentCount = merged_color_count,
++         .pColorAttachmentFormats = mp->pipeline_info.pColorAttachmentFormats,
++         .depthAttachmentFormat = subpass->pipeline_info.depthAttachmentFormat,
++         .stencilAttachmentFormat = subpass->pipeline_info.stencilAttachmentFormat,
++      };
++   }
++}
++
+ VKAPI_ATTR VkResult VKAPI_CALL
+ vk_common_CreateRenderPass2(VkDevice _device,
+                             const VkRenderPassCreateInfo2 *pCreateInfo,
+@@ -961,6 +1172,8 @@ vk_common_CreateRenderPass2(VkDevice _device,
+       pass->fragment_density_map.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    }
+ 
++   vk_try_merge_subpasses(device, pass, pCreateInfo, pAllocator);
++
+    *pRenderPass = vk_render_pass_to_handle(pass);
+ 
+    return VK_SUCCESS;
+@@ -972,6 +1185,8 @@ vk_get_pipeline_rendering_create_info(const VkGraphicsPipelineCreateInfo *info)
+    VK_FROM_HANDLE(vk_render_pass, render_pass, info->renderPass);
+    if (render_pass != NULL) {
+       assert(info->subpass < render_pass->subpass_count);
++      if (render_pass->merged != NULL)
++         return &render_pass->subpasses[info->subpass].merged_pipeline_info;
+       return &render_pass->subpasses[info->subpass].pipeline_info;
+    }
+ 
+@@ -984,6 +1199,8 @@ vk_get_pipeline_rendering_ial_info(const VkGraphicsPipelineCreateInfo *info)
+    VK_FROM_HANDLE(vk_render_pass, render_pass, info->renderPass);
+    if (render_pass != NULL) {
+       assert(info->subpass < render_pass->subpass_count);
++      if (render_pass->merged != NULL)
++         return &render_pass->subpasses[info->subpass].merged_ial.info;
+       return &render_pass->subpasses[info->subpass].ial.info;
+    }
+ 
+@@ -991,6 +1208,39 @@ vk_get_pipeline_rendering_ial_info(const VkGraphicsPipelineCreateInfo *info)
+                                RENDERING_INPUT_ATTACHMENT_INDEX_INFO_KHR);
+ }
+ 
++const VkRenderingAttachmentLocationInfoKHR *
++vk_get_pipeline_rendering_cal_info(const VkGraphicsPipelineCreateInfo *info)
++{
++   VK_FROM_HANDLE(vk_render_pass, render_pass, info->renderPass);
++   if (render_pass != NULL) {
++      if (render_pass->merged != NULL) {
++         assert(info->subpass < render_pass->subpass_count);
++         return &render_pass->subpasses[info->subpass].cal.info;
++      }
++      return NULL;
++   }
++
++   return vk_find_struct_const(info->pNext,
++                               RENDERING_ATTACHMENT_LOCATION_INFO_KHR);
++}
++
++uint32_t
++vk_command_buffer_color_attachment_index(const struct vk_command_buffer *cmd_buffer,
++                                         uint32_t idx)
++{
++   const struct vk_render_pass *unmerged = cmd_buffer->unmerged_render_pass;
++   if (!unmerged || cmd_buffer->unmerged_subpass_idx >= unmerged->subpass_count)
++      return idx;
++
++   const struct vk_subpass *subpass =
++      &unmerged->subpasses[cmd_buffer->unmerged_subpass_idx];
++   for (uint32_t m = 0; m < subpass->cal.info.colorAttachmentCount; m++) {
++      if (subpass->cal.colors[m] == idx)
++         return m;
++   }
++   return idx;
++}
++
+ VkPipelineCreateFlags2KHR
+ vk_get_pipeline_rendering_flags(const VkGraphicsPipelineCreateInfo *info)
+ {
+@@ -1281,6 +1531,8 @@ vk_common_DestroyRenderPass(VkDevice _device,
+    if (!pass)
+       return;
+ 
++   if (pass->merged)
++      vk_object_free(device, pAllocator, pass->merged);
+    vk_object_free(device, pAllocator, pass);
+ }
+ 
+@@ -2646,6 +2898,10 @@ vk_common_CmdBeginRenderPass2(VkCommandBuffer commandBuffer,
+                   pRenderPassBeginInfo->framebuffer);
+ 
+    assert(cmd_buffer->render_pass == NULL);
++   cmd_buffer->unmerged_render_pass = pass->merged ? pass : NULL;
++   cmd_buffer->unmerged_subpass_idx = 0;
++   if (pass->merged)
++      pass = pass->merged;
+    cmd_buffer->render_pass = pass;
+    cmd_buffer->subpass_idx = 0;
+ 
+@@ -2795,7 +3051,9 @@ void
+ vk_command_buffer_reset_render_pass(struct vk_command_buffer *cmd_buffer)
+ {
+    cmd_buffer->render_pass = NULL;
++   cmd_buffer->unmerged_render_pass = NULL;
+    cmd_buffer->subpass_idx = 0;
++   cmd_buffer->unmerged_subpass_idx = 0;
+    cmd_buffer->framebuffer = NULL;
+    if (cmd_buffer->attachments != cmd_buffer->_attachments)
+       free(cmd_buffer->attachments);
+@@ -2812,6 +3070,11 @@ vk_common_CmdNextSubpass2(VkCommandBuffer commandBuffer,
+ {
+    VK_FROM_HANDLE(vk_command_buffer, cmd_buffer, commandBuffer);
+ 
++   if (cmd_buffer->unmerged_render_pass != NULL) {
++      cmd_buffer->unmerged_subpass_idx++;
++      return;
++   }
++
+    end_subpass(cmd_buffer, pSubpassEndInfo);
+    cmd_buffer->subpass_idx++;
+    begin_subpass(cmd_buffer, pSubpassBeginInfo);
+diff --git a/src/vulkan/runtime/vk_render_pass.h b/src/vulkan/runtime/vk_render_pass.h
+index 302a960..73ab06b 100644
+--- a/src/vulkan/runtime/vk_render_pass.h
++++ b/src/vulkan/runtime/vk_render_pass.h
+@@ -158,6 +158,7 @@ struct vk_subpass {
+     * VkGraphicsPipelineCreateInfo::renderPass != VK_NULL_HANDLE.
+     */
+    VkPipelineRenderingCreateInfo pipeline_info;
++   VkPipelineRenderingCreateInfo merged_pipeline_info;
+ 
+    /** VkCommandBufferInheritanceRenderingInfo for this subpass
+     *
+@@ -166,6 +167,20 @@ struct vk_subpass {
+     */
+    VkCommandBufferInheritanceRenderingInfo inheritance_info;
+ 
++   /** VkRenderingAttachmentLocationInfoKHR for this subpass when merged */
++   struct {
++      VkRenderingAttachmentLocationInfoKHR info;
++      uint32_t colors[MESA_VK_MAX_COLOR_ATTACHMENTS];
++   } cal;
++
++   /** VkRenderingInputAttachmentIndexInfo for this subpass when merged */
++   struct {
++      VkRenderingInputAttachmentIndexInfo info;
++      uint32_t colors[MESA_VK_MAX_COLOR_ATTACHMENTS];
++      uint32_t depth;
++      uint32_t stencil;
++   } merged_ial;
++
+    /** VkMultisampledRenderToSingleSampledInfoEXT for this subpass */
+    VkMultisampledRenderToSingleSampledInfoEXT mrtss;
+ 
+@@ -291,11 +306,23 @@ struct vk_render_pass {
+ 
+    /** VkRenderPassCreateInfo2::pDependencies */
+    struct vk_subpass_dependency *dependencies;
++
++   /** Merged single-subpass render pass, or NULL */
++   struct vk_render_pass *merged;
+ };
+ 
+ VK_DEFINE_NONDISP_HANDLE_CASTS(vk_render_pass, base, VkRenderPass,
+                                VK_OBJECT_TYPE_RENDER_PASS);
+ 
++void vk_render_pass_enable_subpass_merging(void);
++
++const VkRenderingAttachmentLocationInfoKHR *
++vk_get_pipeline_rendering_cal_info(const VkGraphicsPipelineCreateInfo *info);
++
++uint32_t
++vk_command_buffer_color_attachment_index(const struct vk_command_buffer *cmd_buffer,
++                                         uint32_t idx);
++
+ /** Returns the VkPipelineRenderingCreateInfo for a graphics pipeline
+  *
+  * For render-pass-free drivers, this can be used in the implementation of
+-- 
+2.56.1
+
