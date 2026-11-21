@@ -1,0 +1,77 @@
+diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c
+index 1ecaeff..0eca823 100644
+--- a/src/panfrost/lib/kmod/kbase_kmod.c
++++ b/src/panfrost/lib/kmod/kbase_kmod.c
+@@ -2280,7 +2280,7 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
+     * like kbase's own HOST_COHERENT mappings. Without that heap, CPU-mapped
+     * imports are cleaned before each submit (PANVK_KBASE_IMPORT_SYNC).
+     * PANVK_KBASE_UNCACHED_HEAP=0 = 115 (the cached system heap for all). */
+-   if (is_csf && !kbase_dev->heap_is_ion && kbase_dev->dma_heap_fd >= 0 &&
++   if (!kbase_dev->heap_is_ion && kbase_dev->dma_heap_fd >= 0 &&
+        kbase_dev->coherency_mode == DRM_PANTHOR_GPU_COHERENCY_NONE &&
+        debug_get_bool_option("PANVK_KBASE_UNCACHED_HEAP", true)) {
+       kbase_dev->dma_heap_uncached_fd =
+@@ -2289,7 +2289,7 @@ kbase_kmod_dev_create(int fd, uint32_t flags,
+          mesa_logi("kbase: GPU not IO-coherent: HOST_COHERENT dma-heap BOs "
+                    "from /dev/dma_heap/system-uncached "
+                    "(PANVK_KBASE_UNCACHED_HEAP=0 = 115)");
+-      } else {
++      } else if (is_csf) {
+          kbase_dev->csf_import_sync = true;
+          mesa_logi("kbase: GPU not IO-coherent, /dev/dma_heap/system-uncached "
+                    "unavailable (%s): imports cleaned before each submit",
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+index b3ef09b..cac9981 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -4879,16 +4879,32 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+          (void)0;
+    }
+    pan_section_pack(job.cpu, MALLOC_VERTEX_JOB, DRAW, cfg) {
++      const bool had_fb_barrier = cmdbuf->state.pending_fb_barrier;
+       bool need_prim_barrier = false;
+-      if (cmdbuf->state.pending_fb_barrier && fs &&
+-          (fs->fs.input_attachment_read || fs->fs.tile_image_color_read ||
+-           fs->fs.tile_image_z_read || fs->fs.tile_image_s_read)) {
+-         need_prim_barrier = true;
++      if (had_fb_barrier) {
+          cmdbuf->state.pending_fb_barrier = false;
++         if (!fs) {
++            need_prim_barrier = true;
++         } else {
++            uint8_t rt_mask = cmdbuf->state.gfx.render.bound_attachments &
++                              MESA_VK_RP_ATTACHMENT_ANY_COLOR_BITS;
++            uint32_t rt_written = color_attachment_written_mask(fs, &dyns->cal);
++            u_foreach_bit(rt, rt_written) {
++               if (!(dyns->cb.color_write_enables & BITFIELD_BIT(rt)) ||
++                   !(dyns->cb.attachments[rt].write_mask & 0xf))
++                  rt_written &= ~BITFIELD_BIT(rt);
++            }
++            uint32_t rt_read =
++               color_attachment_read_mask(fs, &dyns->ial, rt_mask);
++            need_prim_barrier =
++               (rt_read & ~rt_written) != 0 ||
++               z_attachment_read(fs, &dyns->ial) ||
++               s_attachment_read(fs, &dyns->ial);
++         }
+       }
+       cfg.flags_0.primitive_barrier = need_prim_barrier;
+       cfg.flags_0.allow_primitive_reorder =
+-         !cmdbuf->state.gfx.cb.info.any_dest_read;
++         !had_fb_barrier && !cmdbuf->state.gfx.cb.info.any_dest_read;
+       cfg.flags_0.scissor_to_bounding_box = polygon;
+       cfg.flags_0.cull_front_face = !tess_nocull && polygon && (rs->cull_mode & VK_CULL_MODE_FRONT_BIT);
+       cfg.flags_0.cull_back_face = !tess_nocull && polygon && (rs->cull_mode & VK_CULL_MODE_BACK_BIT);
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c
+index 46195d0..f5f1c49 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c
+@@ -278,7 +278,7 @@ panvk_per_arch(CmdBeginQueryIndexedEXT)(VkCommandBuffer commandBuffer,
+    VK_FROM_HANDLE(panvk_query_pool, pool, queryPool);
+ 
+    bool had_batch;
+-#if PAN_ARCH < 9
++#if PAN_ARCH <= 9
+    struct panvk_batch *batch =
+       open_batch_flags(cmd, &had_batch, panvk_v7_begin_query_serial());
+ #else
