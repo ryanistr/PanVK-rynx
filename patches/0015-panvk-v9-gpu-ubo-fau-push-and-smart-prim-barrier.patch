@@ -1,0 +1,502 @@
+diff --git a/src/panfrost/libpan/draw_helper.cl b/src/panfrost/libpan/draw_helper.cl
+index 57cf2d3..1db48ee 100644
+--- a/src/panfrost/libpan/draw_helper.cl
++++ b/src/panfrost/libpan/draw_helper.cl
+@@ -2506,6 +2506,17 @@ panlib_v9_copy32(global uint32_t *dst, constant uint32_t *src)
+    *dst = *src;
+ }
+ 
++KERNEL(32)
++panlib_v9_ubo_push_copy32(constant uint64_t *pairs, uint32_t count)
++{
++   uint32_t i = cl_global_id.x;
++   if (i >= count)
++      return;
++   uint64_t src = pairs[2 * i];
++   uint64_t dst = pairs[2 * i + 1];
++   *(global uint32_t *)(uintptr_t)dst = *(constant uint32_t *)(uintptr_t)src;
++}
++
+ /* Multi-viewport draws on v9 JM. CSF draws the viewport runs of
+  * panlib_vp_runs() in a command stream loop, each with its viewport's depth
+  * clamp. JM has a fixed job chain: the runs of each viewport are packed
+diff --git a/src/panfrost/vulkan/jm/panvk_cmd_buffer.h b/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
+index 2a2d69c..7827a51 100644
+--- a/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
++++ b/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
+@@ -31,12 +31,21 @@
+ 
+ #include "genxml/gen_macros.h"
+ 
++#if PAN_ARCH == 9
++struct panvk_ubo_push_pair {
++   uint64_t src;
++   uint64_t dst;
++};
++#endif
++
+ struct panvk_batch {
+    struct list_head node;
+    struct util_dynarray jobs;
+ #if PAN_ARCH == 9
+    /* MALLOC_VERTEX jobs, the GPU writes their vertex array pointer. */
+    struct util_dynarray malloc_vertex_jobs;
++   struct util_dynarray ubo_push_pairs;
++   struct pan_jc ubo_push_jc;
+ #endif
+    /* The vertex/tiler chain writes SYSTEM_TIMESTAMP values (v9, and v6/v7
+     * since jm-v7 021). */
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+index ac42ac9..9490d42 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+@@ -22,6 +22,7 @@
+ #include "panvk_cmd_draw.h"
+ #include "panvk_cmd_frame_shaders.h"
+ #include "panvk_cmd_pool.h"
++#include "panvk_cmd_precomp.h"
+ #include "panvk_cmd_push_constant.h"
+ #include "panvk_device.h"
+ #include "panvk_entrypoints.h"
+@@ -147,6 +148,9 @@ cmd_close_batch_impl(struct panvk_cmd_buffer *cmdbuf)
+       if (util_dynarray_num_elements(&batch->event_ops,
+                                      struct panvk_cmd_event_op) == 0) {
+          /* Content-less batch, let's drop it */
++#if PAN_ARCH == 9
++         util_dynarray_fini(&batch->ubo_push_pairs);
++#endif
+          vk_free(&cmdbuf->vk.pool->alloc, batch);
+       } else {
+          /* Batch has no jobs but is needed for synchronization, let's add a
+@@ -175,6 +179,29 @@ cmd_close_batch_impl(struct panvk_cmd_buffer *cmdbuf)
+ 
+    list_addtail(&batch->node, &cmdbuf->batches);
+ 
++#if PAN_ARCH == 9
++   const uint32_t ubo_pair_count =
++      util_dynarray_num_elements(&batch->ubo_push_pairs,
++                                 struct panvk_ubo_push_pair);
++   if (ubo_pair_count && batch->fb.desc.cpu &&
++       (batch->vtc_jc.first_tiler || cmdbuf->state.gfx.render.fb.needs_store)) {
++      struct pan_ptr pairs = panvk_cmd_alloc_dev_mem(
++         cmdbuf, desc, ubo_pair_count * sizeof(struct panvk_ubo_push_pair), 8);
++      if (pairs.gpu) {
++         memcpy(pairs.cpu, batch->ubo_push_pairs.data,
++                ubo_pair_count * sizeof(struct panvk_ubo_push_pair));
++         struct pan_jc saved_vtc = batch->vtc_jc;
++         batch->vtc_jc = batch->ubo_push_jc;
++         struct panvk_precomp_ctx pctx = panvk_per_arch(precomp_cs)(cmdbuf);
++         panlib_v9_ubo_push_copy32(
++            &pctx, panlib_1d(DIV_ROUND_UP(ubo_pair_count, 32)),
++            PANLIB_BARRIER_JM_BARRIER, pairs.gpu, ubo_pair_count);
++         batch->ubo_push_jc = batch->vtc_jc;
++         batch->vtc_jc = saved_vtc;
++      }
++   }
++#endif
++
+    if (batch->tlsinfo.tls.size) {
+       unsigned thread_tls_alloc =
+          pan_query_thread_tls_alloc(&phys_dev->kmod.dev->props);
+@@ -510,6 +537,7 @@ panvk_per_arch(cmd_open_batch)(struct panvk_cmd_buffer *cmdbuf)
+    cmdbuf->cur_batch->jobs = UTIL_DYNARRAY_INIT;
+ #if PAN_ARCH == 9
+    cmdbuf->cur_batch->malloc_vertex_jobs = UTIL_DYNARRAY_INIT;
++   cmdbuf->cur_batch->ubo_push_pairs = UTIL_DYNARRAY_INIT;
+ #endif
+    cmdbuf->cur_batch->event_ops = UTIL_DYNARRAY_INIT;
+    cmdbuf->cur_batch->vary_infos = UTIL_DYNARRAY_INIT;
+@@ -597,6 +625,7 @@ panvk_reset_cmdbuf(struct vk_command_buffer *vk_cmdbuf,
+       util_dynarray_fini(&batch->jobs);
+ #if PAN_ARCH == 9
+       util_dynarray_fini(&batch->malloc_vertex_jobs);
++      util_dynarray_fini(&batch->ubo_push_pairs);
+ #endif
+       util_dynarray_fini(&batch->event_ops);
+       util_dynarray_fini(&batch->vary_infos);
+@@ -626,6 +655,7 @@ panvk_destroy_cmdbuf(struct vk_command_buffer *vk_cmdbuf)
+       util_dynarray_fini(&batch->jobs);
+ #if PAN_ARCH == 9
+       util_dynarray_fini(&batch->malloc_vertex_jobs);
++      util_dynarray_fini(&batch->ubo_push_pairs);
+ #endif
+       util_dynarray_fini(&batch->event_ops);
+       util_dynarray_fini(&batch->vary_infos);
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+index 1d35dd2..b3ef09b 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -4879,8 +4879,14 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+          (void)0;
+    }
+    pan_section_pack(job.cpu, MALLOC_VERTEX_JOB, DRAW, cfg) {
+-      cfg.flags_0.primitive_barrier = cmdbuf->state.pending_fb_barrier;
+-      cmdbuf->state.pending_fb_barrier = false;
++      bool need_prim_barrier = false;
++      if (cmdbuf->state.pending_fb_barrier && fs &&
++          (fs->fs.input_attachment_read || fs->fs.tile_image_color_read ||
++           fs->fs.tile_image_z_read || fs->fs.tile_image_s_read)) {
++         need_prim_barrier = true;
++         cmdbuf->state.pending_fb_barrier = false;
++      }
++      cfg.flags_0.primitive_barrier = need_prim_barrier;
+       cfg.flags_0.allow_primitive_reorder =
+          !cmdbuf->state.gfx.cb.info.any_dest_read;
+       cfg.flags_0.scissor_to_bounding_box = polygon;
+@@ -6755,6 +6761,47 @@ v9_tess_draw(struct panvk_cmd_buffer *cmdbuf,
+       vk_command_buffer_set_error(&cmdbuf->vk, VK_ERROR_OUT_OF_DEVICE_MEMORY);
+ }
+ 
++static void
++v9_record_ubo_push_pairs(struct panvk_cmd_buffer *cmdbuf,
++                         const struct panvk_shader_variant *shader,
++                         uint64_t fau_gpu)
++{
++   const uint32_t count = shader->fau.ubo_push.count;
++   if (!count || !fau_gpu)
++      return;
++
++   struct panvk_batch *batch = cmdbuf->cur_batch;
++   const struct panvk_descriptor_state *desc_state = &cmdbuf->state.gfx.desc_state;
++   const uint64_t dst_base =
++      fau_gpu + (uint64_t)shader->fau.ubo_push.fau_base * sizeof(uint64_t);
++
++   for (uint32_t i = 0; i < count; i++) {
++      const uint8_t set_idx = shader->fau.ubo_push.entries[i].set;
++      const uint16_t desc_idx = shader->fau.ubo_push.entries[i].desc_idx;
++      const uint32_t offset = shader->fau.ubo_push.entries[i].offset;
++
++      if (set_idx >= MAX_SETS)
++         continue;
++      const struct panvk_descriptor_set *set = desc_state->sets[set_idx];
++      if (!set || !set->descs.host || desc_idx >= set->desc_count)
++         continue;
++
++      const struct mali_buffer_packed *packed =
++         (const struct mali_buffer_packed *)((const uint8_t *)set->descs.host +
++                                             (size_t)desc_idx * PANVK_DESCRIPTOR_SIZE);
++      pan_unpack(packed, BUFFER, buf);
++      if (buf.type != MALI_DESCRIPTOR_TYPE_BUFFER || !buf.address ||
++          (uint64_t)offset + sizeof(uint32_t) > buf.size)
++         continue;
++
++      struct panvk_ubo_push_pair pair = {
++         .src = buf.address + offset,
++         .dst = dst_base + (uint64_t)i * sizeof(uint32_t),
++      };
++      util_dynarray_append(&batch->ubo_push_pairs, pair);
++   }
++}
++
+ static void
+ v9_cmd_draw_layer(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_info *info)
+ {
+@@ -6867,6 +6914,7 @@ v9_cmd_draw_layer(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_info *info)
+       if (result != VK_SUCCESS)
+          return;
+       cmdbuf->state.gfx.fs.push_uniforms = fs_push.gpu;
++      v9_record_ubo_push_pairs(cmdbuf, fs, fs_push.gpu);
+    }
+    (void)0;
+    result = v9_emit_malloc_vertex_job(cmdbuf, info, vs, fs, blend_gpu, zsd_gpu);
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
+index b47b2e6..6f9735c 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
+@@ -257,6 +257,13 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
+             kbase_kmod_wait_atom(dev->kmod.dev, queue->in_dep, -1);
+             queue->in_dep = 0;
+          }
++#if PAN_ARCH == 9
++         if (batch->ubo_push_jc.first_job) {
++            kbase_kmod_job_submit_retry(
++               dev->kmod.dev, batch->ubo_push_jc.first_job, BASE_JD_REQ_CS,
++               bos, nr_bos, NULL, 0, 5);
++         }
++#endif
+          (void)0;
+          bool ok = kbase_kmod_job_submit_retry(
+             dev->kmod.dev, batch->frag_jc.first_job, BASE_JD_REQ_FS,
+@@ -267,11 +274,25 @@ panvk_queue_submit_batch(struct panvk_gpu_queue *queue,
+       } else {
+          const bool frag_ov =
+             panvk_overlap_enabled() && vtc_atom && !queue->in_dep; /* v67b */
++         uint64_t frag_dep0 = vtc_atom ? vtc_atom : queue->last_any_atom;
++         uint8_t frag_dep0_type =
++            vtc_atom ? BASE_JD_DEP_TYPE_DATA
++                     : dep_type(queue, queue->last_any_atom);
++#if PAN_ARCH == 9
++         if (batch->ubo_push_jc.first_job) {
++            uint64_t ubo_atom = kbase_kmod_job_submit_dep(
++               dev->kmod.dev, batch->ubo_push_jc.first_job, BASE_JD_REQ_CS,
++               bos, nr_bos, frag_dep0, frag_dep0_type, queue->last_frag_atom,
++               dep_type(queue, queue->last_frag_atom), true);
++            assert(ubo_atom);
++            note_submitted(queue, ubo_atom);
++            frag_dep0 = ubo_atom;
++            frag_dep0_type = BASE_JD_DEP_TYPE_DATA;
++         }
++#endif
+          frag_atom = kbase_kmod_job_submit_dep(dev->kmod.dev, batch->frag_jc.first_job,
+                                              BASE_JD_REQ_FS, bos, nr_bos,
+-                                             vtc_atom ? vtc_atom : queue->last_any_atom,
+-                                             vtc_atom ? BASE_JD_DEP_TYPE_DATA
+-                                                      : dep_type(queue, queue->last_any_atom),
++                                             frag_dep0, frag_dep0_type,
+                                              frag_ov ? queue->last_frag_atom : queue->in_dep,
+                                              frag_ov ? dep_type(queue, queue->last_frag_atom)
+                                                      : BASE_JD_DEP_TYPE_ORDER,
+diff --git a/src/panfrost/vulkan/panvk_shader.h b/src/panfrost/vulkan/panvk_shader.h
+index ba7b474..53eafa7 100644
+--- a/src/panfrost/vulkan/panvk_shader.h
++++ b/src/panfrost/vulkan/panvk_shader.h
+@@ -443,6 +443,18 @@ struct panvk_shader_fau_info {
+    BITSET_DECLARE(used_push_consts, MAX_PUSH_CONST_FAUS);
+    uint32_t sysval_count;
+    uint32_t total_count;
++#if PAN_ARCH >= 9
++#define PANVK_MAX_UBO_PUSH_WORDS 112
++   struct {
++      uint32_t count;
++      uint32_t fau_base;
++      struct {
++         uint8_t set;
++         uint16_t desc_idx;
++         uint32_t offset;
++      } entries[PANVK_MAX_UBO_PUSH_WORDS];
++   } ubo_push;
++#endif
+ };
+ 
+ struct panvk_shader_desc_info {
+@@ -470,6 +482,7 @@ struct panvk_shader_desc_info {
+       uint32_t count;
+    } dyn_bufs;
+    uint32_t fs_varying_attr_desc_count;
++   uint32_t non_pushable_set_mask;
+ #endif
+ };
+ 
+diff --git a/src/panfrost/vulkan/panvk_vX_cmd_push_constant.c b/src/panfrost/vulkan/panvk_vX_cmd_push_constant.c
+index 0e8eebd..8bb668c 100644
+--- a/src/panfrost/vulkan/panvk_vX_cmd_push_constant.c
++++ b/src/panfrost/vulkan/panvk_vX_cmd_push_constant.c
+@@ -63,6 +63,15 @@ prepare_push_uniforms(struct panvk_cmd_buffer *cmdbuf,
+          repeat_faus[fau_idx++] = push_consts[w];
+       assert(fau_idx <= shader->fau.total_count);
+ 
++#if PAN_ARCH >= 9
++      if (shader->fau.ubo_push.count) {
++         uint32_t ubo_fau_count = DIV_ROUND_UP(shader->fau.ubo_push.count, 2);
++         memset(&repeat_faus[shader->fau.ubo_push.fau_base], 0,
++                ubo_fau_count * sizeof(uint64_t));
++         fau_idx = MAX2(fau_idx, shader->fau.ubo_push.fau_base + ubo_fau_count);
++      }
++#endif
++
+       pan_fau_foreach_imm(fau, i) {
+          bool hi = (i & 1) != 0;
+          unsigned idx = i / 2;
+diff --git a/src/panfrost/vulkan/panvk_vX_shader.c b/src/panfrost/vulkan/panvk_vX_shader.c
+index 55e2a6f..462e513 100644
+--- a/src/panfrost/vulkan/panvk_vX_shader.c
++++ b/src/panfrost/vulkan/panvk_vX_shader.c
+@@ -39,6 +39,7 @@
+ #include "spirv/nir_spirv.h"
+ #include "util/memstream.h"
+ #include "util/mesa-blake3.h"
++#include "util/os_misc.h"
+ #include "util/shader_stats.h"
+ #include "util/u_atomic.h"
+ #include "util/u_dynarray.h"
+@@ -3457,6 +3458,29 @@ panvk_lower_nir(struct panvk_device *dev, nir_shader *nir,
+    panvk_per_arch(nir_lower_descriptors)(nir, dev, rs, set_layout_count,
+                                          set_layouts, state, desc_info);
+ 
++#if PAN_ARCH >= 9
++   desc_info->non_pushable_set_mask = 0;
++   for (uint32_t s = 0; s < set_layout_count; s++) {
++      if (!set_layouts[s])
++         continue;
++      const struct panvk_descriptor_set_layout *sl =
++         to_panvk_descriptor_set_layout(set_layouts[s]);
++      if (sl->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT) {
++         desc_info->non_pushable_set_mask |= BITFIELD_BIT(s);
++         continue;
++      }
++      for (uint32_t b = 0; b < sl->binding_count; b++) {
++         VkDescriptorType t = sl->bindings[b].type;
++         if (t == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC ||
++             t == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC ||
++             t == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK) {
++            desc_info->non_pushable_set_mask |= BITFIELD_BIT(s);
++            break;
++         }
++      }
++   }
++#endif
++
+    NIR_PASS(_, nir, nir_split_var_copies);
+    NIR_PASS(_, nir, nir_lower_var_copies);
+    NIR_PASS(_, nir, nir_lower_memcpy);
+@@ -3597,6 +3621,132 @@ panvk_lower_nir_io(nir_shader *nir)
+    pan_nir_lower_mediump_io(nir);
+ }
+ 
++#if PAN_ARCH == 9
++struct ubo_push_ctx {
++   struct panvk_shader_variant *shader;
++   uint32_t non_pushable_set_mask;
++   uint32_t max_words;
++};
++
++static int
++ubo_push_find_word(const struct panvk_shader_variant *shader, uint8_t set,
++                   uint16_t desc_idx, uint32_t offset)
++{
++   for (uint32_t i = 0; i < shader->fau.ubo_push.count; i++) {
++      if (shader->fau.ubo_push.entries[i].set == set &&
++          shader->fau.ubo_push.entries[i].desc_idx == desc_idx &&
++          shader->fau.ubo_push.entries[i].offset == offset)
++         return (int)i;
++   }
++   return -1;
++}
++
++static bool
++push_ubo_load_intr(nir_builder *b, nir_intrinsic_instr *intr, void *data)
++{
++   if (intr->intrinsic != nir_intrinsic_load_ubo)
++      return false;
++
++   if (intr->def.bit_size != 32 || intr->num_components > 4)
++      return false;
++
++   if (!nir_src_is_const(intr->src[0]) || !nir_src_is_const(intr->src[1]))
++      return false;
++
++   struct ubo_push_ctx *ctx = data;
++   struct panvk_shader_variant *shader = ctx->shader;
++
++   const uint32_t packed = nir_src_as_uint(intr->src[0]);
++   const uint32_t table = packed >> 24;
++   const uint32_t desc_idx = packed & 0xffffff;
++   if (table < 1 || table > MAX_SETS || desc_idx > UINT16_MAX)
++      return false;
++
++   const uint8_t set = table - 1;
++   if (ctx->non_pushable_set_mask & BITFIELD_BIT(set))
++      return false;
++
++   const uint32_t offset = nir_src_as_uint(intr->src[1]);
++   if (offset & 3)
++      return false;
++
++   int slots[4];
++   uint32_t needed = 0;
++   for (unsigned c = 0; c < intr->num_components; c++) {
++      slots[c] = ubo_push_find_word(shader, set, desc_idx, offset + c * 4);
++      if (slots[c] < 0)
++         needed++;
++   }
++
++   if (shader->fau.ubo_push.count + needed > ctx->max_words)
++      return false;
++
++   b->cursor = nir_before_instr(&intr->instr);
++
++   nir_def *comps[4];
++   const uint32_t base_bytes = shader->fau.ubo_push.fau_base * FAU_WORD_SIZE;
++   for (unsigned c = 0; c < intr->num_components; c++) {
++      int slot = slots[c];
++      if (slot < 0) {
++         slot = (int)shader->fau.ubo_push.count++;
++         shader->fau.ubo_push.entries[slot].set = set;
++         shader->fau.ubo_push.entries[slot].desc_idx = desc_idx;
++         shader->fau.ubo_push.entries[slot].offset = offset + c * 4;
++      }
++      comps[c] = nir_load_push_constant(
++         b, 1, 32, nir_imm_int(b, base_bytes + (uint32_t)slot * 4),
++         .base = 0, .range = 0);
++   }
++
++   nir_def *replacement =
++      intr->num_components == 1 ? comps[0] : nir_vec(b, comps, intr->num_components);
++   nir_def_replace(&intr->def, replacement);
++   return true;
++}
++
++static void
++panvk_push_ubo_loads(nir_shader *nir,
++                     const struct panvk_shader_desc_info *desc_info,
++                     struct panvk_shader_variant *shader)
++{
++   static int mode = -1;
++   static int spare = -1;
++   if (mode < 0) {
++      const char *e = os_get_option("PANVK_UBO_PUSH");
++      mode = e ? atoi(e) : 1;
++   }
++   if (spare < 0) {
++      const char *e = os_get_option("PANVK_UBO_PUSH_SPARE");
++      spare = e ? atoi(e) : 8;
++      if (spare < 0)
++         spare = 0;
++   }
++
++   if (!(mode & 1))
++      return;
++
++   if (shader->fau.total_count + (uint32_t)spare >= FAU_WORD_COUNT)
++      return;
++
++   const uint32_t avail_pairs =
++      FAU_WORD_COUNT - (shader->fau.total_count + (uint32_t)spare);
++   struct ubo_push_ctx ctx = {
++      .shader = shader,
++      .non_pushable_set_mask = desc_info->non_pushable_set_mask,
++      .max_words = MIN2(PANVK_MAX_UBO_PUSH_WORDS, avail_pairs * 2),
++   };
++
++   shader->fau.ubo_push.fau_base = shader->fau.total_count;
++   shader->fau.ubo_push.count = 0;
++
++   NIR_PASS(_, nir, nir_shader_intrinsics_pass, push_ubo_load_intr,
++            nir_metadata_control_flow, &ctx);
++
++   if (shader->fau.ubo_push.count)
++      shader->fau.total_count += DIV_ROUND_UP(shader->fau.ubo_push.count, 2);
++}
++#endif
++
+ static VkResult
+ panvk_compile_nir(struct panvk_device *dev, nir_shader *nir,
+                   VkShaderCreateFlagsEXT shader_flags,
+@@ -3630,6 +3780,11 @@ panvk_compile_nir(struct panvk_device *dev, nir_shader *nir,
+ 
+    lower_load_push_consts(nir, shader);
+ 
++#if PAN_ARCH == 9
++   if (desc_info && nir->info.stage == MESA_SHADER_FRAGMENT)
++      panvk_push_ubo_loads(nir, desc_info, shader);
++#endif
++
+    /* Reserve sysvals/push-const, the compiler may fill the remaining space with
+     * promoted constants. */
+    input.fau.reserved = shader->fau.total_count * 2;
+@@ -6057,6 +6212,7 @@ shader_desc_info_deserialize(struct panvk_device *dev,
+                    sizeof(*shader->desc_info.dyn_bufs.map) *
+                       shader->desc_info.dyn_bufs.count);
+    shader->desc_info.fs_varying_attr_desc_count = blob_read_uint32(blob);
++   shader->desc_info.non_pushable_set_mask = blob_read_uint32(blob);
+ #endif
+ 
+    return VK_SUCCESS;
+@@ -6266,6 +6422,7 @@ shader_desc_info_serialize(struct blob *blob,
+                     sizeof(*shader->desc_info.dyn_bufs.map) *
+                        shader->desc_info.dyn_bufs.count);
+    blob_write_uint32(blob, shader->desc_info.fs_varying_attr_desc_count);
++   blob_write_uint32(blob, shader->desc_info.non_pushable_set_mask);
+ #endif
+ }
+ 
