@@ -1,0 +1,18 @@
+diff --git a/src/panfrost/vulkan/panvk_vX_shader.c b/src/panfrost/vulkan/panvk_vX_shader.c
+index 462e513..21f6371 100644
+--- a/src/panfrost/vulkan/panvk_vX_shader.c
++++ b/src/panfrost/vulkan/panvk_vX_shader.c
+@@ -3470,10 +3470,9 @@ panvk_lower_nir(struct panvk_device *dev, nir_shader *nir,
+          continue;
+       }
+       for (uint32_t b = 0; b < sl->binding_count; b++) {
+-         VkDescriptorType t = sl->bindings[b].type;
+-         if (t == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC ||
+-             t == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC ||
+-             t == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK) {
++         if (sl->bindings[b].flags &
++             (VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
++              VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT)) {
+             desc_info->non_pushable_set_mask |= BITFIELD_BIT(s);
+             break;
+          }
