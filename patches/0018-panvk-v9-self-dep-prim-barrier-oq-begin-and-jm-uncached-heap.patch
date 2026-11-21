@@ -63,9 +63,18 @@ index b3ef09b..cac9981 100644
        cfg.flags_0.cull_front_face = !tess_nocull && polygon && (rs->cull_mode & VK_CULL_MODE_FRONT_BIT);
        cfg.flags_0.cull_back_face = !tess_nocull && polygon && (rs->cull_mode & VK_CULL_MODE_BACK_BIT);
 diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c
-index 46195d0..f5f1c49 100644
+index 46195d0..6b18893 100644
 --- a/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c
 +++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_query.c
+@@ -97,7 +97,7 @@ open_batch(struct panvk_cmd_buffer *cmd, bool *had_batch)
+    return open_batch_flags(cmd, had_batch, true);
+ }
+ 
+-#if PAN_ARCH < 9
++#if PAN_ARCH <= 9
+ /* jm-v7 088 (review M9): BeginQuery only zeroes the reports of the query
+  * it begins, and the batch is usually the render pass batch holding the
+  * counted draws, so after_frag there turned PANVK_OVERLAP off for every
 @@ -278,7 +278,7 @@ panvk_per_arch(CmdBeginQueryIndexedEXT)(VkCommandBuffer commandBuffer,
     VK_FROM_HANDLE(panvk_query_pool, pool, queryPool);
  
