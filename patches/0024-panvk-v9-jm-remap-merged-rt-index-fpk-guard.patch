@@ -1,0 +1,30 @@
+From f7bf9cc0015d0514eed85557b2f66ca72470cfa0 Mon Sep 17 00:00:00 2001
+From: PanVK-rynx <panvk@local>
+Date: Mon, 23 Nov 2026 16:15:50 +0700
+Subject: [PATCH] panvk: v9 JM remap merged RT index to pipeline attachment in
+ FPK write-mask guard
+
+---
+ src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+index 2d9a591..300d739 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -4889,8 +4889,10 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+          shader_rt_written = color_attachment_written_mask(fs, &dyns->cal);
+          rt_written = shader_rt_written;
+          u_foreach_bit(rt, rt_written) {
+-            if (!(dyns->cb.color_write_enables & BITFIELD_BIT(rt)) ||
+-                !(dyns->cb.attachments[rt].write_mask & 0xf))
++            uint32_t pipe_att = dyns->cal.color_map[rt];
++            if (pipe_att == MESA_VK_ATTACHMENT_UNUSED ||
++                !(dyns->cb.color_write_enables & BITFIELD_BIT(pipe_att)) ||
++                !(dyns->cb.attachments[pipe_att].write_mask & 0xf))
+                rt_written &= ~BITFIELD_BIT(rt);
+          }
+          rt_read = color_attachment_read_mask(fs, &dyns->ial, rt_mask);
+-- 
+2.56.1
+
