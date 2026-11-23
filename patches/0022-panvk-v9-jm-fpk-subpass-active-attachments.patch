@@ -1,0 +1,43 @@
+From f09db25178be78e77172442765aae8f2f395793c Mon Sep 17 00:00:00 2001
+From: PanVK-rynx <panvk@local>
+Date: Mon, 23 Nov 2026 14:36:28 +0700
+Subject: [PATCH] panvk: v9 JM scope FPK guard to subpass active attachments
+
+---
+ src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+index 8c0d6b6..ba309d4 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -4880,11 +4880,17 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+    }
+    pan_section_pack(job.cpu, MALLOC_VERTEX_JOB, DRAW, cfg) {
+       uint8_t rt_mask = 0;
++      uint8_t subpass_rt_mask = 0;
+       uint32_t rt_written = 0;
+       uint32_t rt_read = 0;
+       if (fs) {
+          rt_mask = cmdbuf->state.gfx.render.bound_attachments &
+                    MESA_VK_RP_ATTACHMENT_ANY_COLOR_BITS;
++         for (uint32_t i = 0; i < MAX_RTS; i++) {
++            if ((rt_mask & BITFIELD_BIT(i)) &&
++                dyns->cal.color_map[i] != MESA_VK_ATTACHMENT_UNUSED)
++               subpass_rt_mask |= BITFIELD_BIT(i);
++         }
+          rt_written = color_attachment_written_mask(fs, &dyns->cal);
+          u_foreach_bit(rt, rt_written) {
+             if (!(dyns->cb.color_write_enables & BITFIELD_BIT(rt)) ||
+@@ -4994,7 +5000,7 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+           * doesn't read the destination (and no alpha-to-coverage). */
+          cfg.flags_0.allow_forward_pixel_to_kill =
+             fs->info.fs.can_fpk &&
+-            !(rt_mask & ~rt_written) &&
++            !(subpass_rt_mask & ~rt_written) &&
+             !(rt_read & rt_written) &&
+             !cmdbuf->state.gfx.cb.info.any_dest_read &&
+             !dyns->ms.alpha_to_coverage_enable &&
+-- 
+2.56.1
+
