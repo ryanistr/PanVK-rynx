@@ -1,0 +1,80 @@
+From 0f4ccdd3f6606003798e25075dbe959369091430 Mon Sep 17 00:00:00 2001
+From: PanVK-rynx <panvk@local>
+Date: Mon, 23 Nov 2026 13:46:38 +0700
+Subject: [PATCH] panvk: v9 JM forward pixel kill write mask guard and render
+ target mask
+
+---
+ src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c | 36 ++++++++++++++--------
+ 1 file changed, 23 insertions(+), 13 deletions(-)
+
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+index cac9981..8c0d6b6 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -4879,6 +4879,21 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+          (void)0;
+    }
+    pan_section_pack(job.cpu, MALLOC_VERTEX_JOB, DRAW, cfg) {
++      uint8_t rt_mask = 0;
++      uint32_t rt_written = 0;
++      uint32_t rt_read = 0;
++      if (fs) {
++         rt_mask = cmdbuf->state.gfx.render.bound_attachments &
++                   MESA_VK_RP_ATTACHMENT_ANY_COLOR_BITS;
++         rt_written = color_attachment_written_mask(fs, &dyns->cal);
++         u_foreach_bit(rt, rt_written) {
++            if (!(dyns->cb.color_write_enables & BITFIELD_BIT(rt)) ||
++                !(dyns->cb.attachments[rt].write_mask & 0xf))
++               rt_written &= ~BITFIELD_BIT(rt);
++         }
++         rt_read = color_attachment_read_mask(fs, &dyns->ial, rt_mask);
++      }
++
+       const bool had_fb_barrier = cmdbuf->state.pending_fb_barrier;
+       bool need_prim_barrier = false;
+       if (had_fb_barrier) {
+@@ -4886,16 +4901,6 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+          if (!fs) {
+             need_prim_barrier = true;
+          } else {
+-            uint8_t rt_mask = cmdbuf->state.gfx.render.bound_attachments &
+-                              MESA_VK_RP_ATTACHMENT_ANY_COLOR_BITS;
+-            uint32_t rt_written = color_attachment_written_mask(fs, &dyns->cal);
+-            u_foreach_bit(rt, rt_written) {
+-               if (!(dyns->cb.color_write_enables & BITFIELD_BIT(rt)) ||
+-                   !(dyns->cb.attachments[rt].write_mask & 0xf))
+-                  rt_written &= ~BITFIELD_BIT(rt);
+-            }
+-            uint32_t rt_read =
+-               color_attachment_read_mask(fs, &dyns->ial, rt_mask);
+             need_prim_barrier =
+                (rt_read & ~rt_written) != 0 ||
+                z_attachment_read(fs, &dyns->ial) ||
+@@ -4982,15 +4987,20 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+          cfg.flags_0.shader_modifies_coverage = !v61a_no_smc() &&
+             (fs->info.fs.can_discard || fs->info.fs.writes_coverage ||
+              dyns->ms.alpha_to_coverage_enable);
++         bool roa_color =
++            cmdbuf->vk.dynamic_graphics_state.rasterization_order_access &
++            VK_IMAGE_ASPECT_COLOR_BIT;
+          /* FPK would discard what lies underneath; only allowed when blending
+           * doesn't read the destination (and no alpha-to-coverage). */
+          cfg.flags_0.allow_forward_pixel_to_kill =
+             fs->info.fs.can_fpk &&
++            !(rt_mask & ~rt_written) &&
++            !(rt_read & rt_written) &&
+             !cmdbuf->state.gfx.cb.info.any_dest_read &&
+-            !dyns->ms.alpha_to_coverage_enable;
++            !dyns->ms.alpha_to_coverage_enable &&
++            !roa_color;
+          cfg.flags_0.allow_forward_pixel_to_be_killed = !fs->info.writes_global;
+-         cfg.flags_1.render_target_mask =
+-            color_attachment_written_mask(fs, &cmdbuf->vk.dynamic_graphics_state.cal);
++         cfg.flags_1.render_target_mask = rt_written;
+          cfg.shader.resources = cmdbuf->state.gfx.fs.desc.res_table;
+          cfg.shader.shader = panvk_priv_mem_dev_addr(fs->spd);
+          cfg.shader.thread_storage = batch->tls.gpu;
+-- 
+2.56.1
+
