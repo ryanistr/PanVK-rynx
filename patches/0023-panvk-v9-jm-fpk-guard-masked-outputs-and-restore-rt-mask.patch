@@ -1,0 +1,55 @@
+From 461c4a27a6613617c7bf6e45519929a7a266f568 Mon Sep 17 00:00:00 2001
+From: PanVK-rynx <panvk@local>
+Date: Mon, 23 Nov 2026 15:07:47 +0700
+Subject: [PATCH] panvk: v9 JM FPK guard against masked-out shader outputs and
+ restore render_target_mask
+
+---
+ src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c | 14 +++++---------
+ 1 file changed, 5 insertions(+), 9 deletions(-)
+
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+index ba309d4..2d9a591 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -4880,18 +4880,14 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+    }
+    pan_section_pack(job.cpu, MALLOC_VERTEX_JOB, DRAW, cfg) {
+       uint8_t rt_mask = 0;
+-      uint8_t subpass_rt_mask = 0;
++      uint32_t shader_rt_written = 0;
+       uint32_t rt_written = 0;
+       uint32_t rt_read = 0;
+       if (fs) {
+          rt_mask = cmdbuf->state.gfx.render.bound_attachments &
+                    MESA_VK_RP_ATTACHMENT_ANY_COLOR_BITS;
+-         for (uint32_t i = 0; i < MAX_RTS; i++) {
+-            if ((rt_mask & BITFIELD_BIT(i)) &&
+-                dyns->cal.color_map[i] != MESA_VK_ATTACHMENT_UNUSED)
+-               subpass_rt_mask |= BITFIELD_BIT(i);
+-         }
+-         rt_written = color_attachment_written_mask(fs, &dyns->cal);
++         shader_rt_written = color_attachment_written_mask(fs, &dyns->cal);
++         rt_written = shader_rt_written;
+          u_foreach_bit(rt, rt_written) {
+             if (!(dyns->cb.color_write_enables & BITFIELD_BIT(rt)) ||
+                 !(dyns->cb.attachments[rt].write_mask & 0xf))
+@@ -5000,13 +4996,13 @@ v9_emit_malloc_vertex_job(struct panvk_cmd_buffer *cmdbuf,
+           * doesn't read the destination (and no alpha-to-coverage). */
+          cfg.flags_0.allow_forward_pixel_to_kill =
+             fs->info.fs.can_fpk &&
+-            !(subpass_rt_mask & ~rt_written) &&
++            !(shader_rt_written & ~rt_written) &&
+             !(rt_read & rt_written) &&
+             !cmdbuf->state.gfx.cb.info.any_dest_read &&
+             !dyns->ms.alpha_to_coverage_enable &&
+             !roa_color;
+          cfg.flags_0.allow_forward_pixel_to_be_killed = !fs->info.writes_global;
+-         cfg.flags_1.render_target_mask = rt_written;
++         cfg.flags_1.render_target_mask = shader_rt_written;
+          cfg.shader.resources = cmdbuf->state.gfx.fs.desc.res_table;
+          cfg.shader.shader = panvk_priv_mem_dev_addr(fs->spd);
+          cfg.shader.thread_storage = batch->tls.gpu;
+-- 
+2.56.1
+
