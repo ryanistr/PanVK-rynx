@@ -1,0 +1,60 @@
+From f6a9df974e1af5bbf1165f2118dc1f1614909cb0 Mon Sep 17 00:00:00 2001
+From: PanVK-rynx <panvk@local>
+Date: Mon, 23 Nov 2026 12:24:58 +0700
+Subject: [PATCH] panvk: raise v9+ indirect function-temp MUX limit to 16
+
+---
+ src/panfrost/compiler/bifrost/bifrost_nir.c | 24 ++++++++++++++++++---
+ 1 file changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/src/panfrost/compiler/bifrost/bifrost_nir.c b/src/panfrost/compiler/bifrost/bifrost_nir.c
+index 4237378..c7c925f 100644
+--- a/src/panfrost/compiler/bifrost/bifrost_nir.c
++++ b/src/panfrost/compiler/bifrost/bifrost_nir.c
+@@ -5,10 +5,13 @@
+  * SPDX-License-Identifier: MIT
+  */
+ 
++#include <stdlib.h>
++
+ #include "compiler/glsl_types.h"
+ #include "compiler/nir/nir_builder.h"
+ #include "panfrost/compiler/pan_compiler.h"
+ #include "panfrost/compiler/pan_nir.h"
++#include "util/os_misc.h"
+ #include "util/perf/cpu_trace.h"
+ 
+ #include "panfrost/model/pan_model.h"
+@@ -1161,11 +1164,26 @@ bifrost_postprocess_nir(nir_shader *nir,
+    if (nir_shader_has_local_variables(nir)) {
+       /* Lower indirect access on small arrays to if/else trees.  After
+        * vars_to_ssa and copy propagation, these will often end up as just a
+-       * handful of MUX instructions instead of memory access.  The threshold
+-       * of 8 array elements is chosen fairly arbitrarily.
++       * handful of MUX instructions instead of memory access.  Valhall (v9+)
++       * raises the threshold to 16 elements to help eliminate TLS in OIT
++       * combine shaders; PANVK_V9_INDIRECT_MUX_LIMIT overrides it (0..32).
+        */
++      unsigned max_indirect_len = 8;
++      if (gpu_arch >= 9) {
++         static int indirect_mux_limit = -1;
++         if (indirect_mux_limit < 0) {
++            const char *env = os_get_option("PANVK_V9_INDIRECT_MUX_LIMIT");
++            indirect_mux_limit = env ? atoi(env) : 16;
++            if (indirect_mux_limit < 0)
++               indirect_mux_limit = 0;
++            if (indirect_mux_limit > 32)
++               indirect_mux_limit = 32;
++         }
++         max_indirect_len = indirect_mux_limit;
++      }
++
+       NIR_PASS(_, nir, nir_lower_indirect_derefs_to_if_else_trees,
+-               nir_var_function_temp, 8);
++               nir_var_function_temp, max_indirect_len);
+ 
+       /* Turn the deref loads/stores we just made direct into SSA values */
+       NIR_PASS(_, nir, nir_opt_constant_folding);
+-- 
+2.56.1
+
