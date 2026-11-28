@@ -1,0 +1,83 @@
+From 99105156fa58c25ca5a88b971e7167ef92b6fcb9 Mon Sep 17 00:00:00 2001
+From: PanVK-rynx <panvk@local>
+Date: Sat, 28 Nov 2026 10:03:16 +0700
+Subject: [PATCH] panvk: refcount nested device memory maps
+
+---
+ src/panfrost/vulkan/panvk_device_memory.c | 26 +++++++++++++++++------
+ src/panfrost/vulkan/panvk_device_memory.h |  1 +
+ 2 files changed, 20 insertions(+), 7 deletions(-)
+
+diff --git a/src/panfrost/vulkan/panvk_device_memory.c b/src/panfrost/vulkan/panvk_device_memory.c
+index 506e2db..2a17a6f 100644
+--- a/src/panfrost/vulkan/panvk_device_memory.c
++++ b/src/panfrost/vulkan/panvk_device_memory.c
+@@ -361,13 +361,15 @@ panvk_MapMemory2KHR(VkDevice _device, const VkMemoryMapInfoKHR *pMemoryMapInfo,
+                           size, (unsigned)(sizeof(size_t) * 8));
+    }
+ 
+-   /* From the Vulkan 1.2.194 spec:
+-    *
+-    *    "memory must not be currently host mapped"
+-    */
+-   if (mem->addr.host)
+-      return panvk_errorf(device, VK_ERROR_MEMORY_MAP_FAILED,
+-                          "Memory object already mapped.");
++   if (mem->addr.host) {
++      if (pMemoryMapInfo->flags & VK_MEMORY_MAP_PLACED_BIT_EXT) {
++         return panvk_errorf(device, VK_ERROR_MEMORY_MAP_FAILED,
++                             "Memory object already mapped.");
++      }
++      mem->map_count++;
++      *ppData = (char *)mem->addr.host + offset;
++      return VK_SUCCESS;
++   }
+ 
+    void *host_addr = NULL;
+    int map_flags = MAP_SHARED;
+@@ -389,6 +391,7 @@ panvk_MapMemory2KHR(VkDevice _device, const VkMemoryMapInfoKHR *pMemoryMapInfo,
+ 
+    assert(!host_addr || addr == host_addr);
+    mem->addr.host = addr;
++   mem->map_count = 1;
+    *ppData = (char *)addr + offset;
+ 
+    return VK_SUCCESS;
+@@ -401,6 +404,14 @@ panvk_UnmapMemory2KHR(VkDevice _device,
+    VK_FROM_HANDLE(panvk_device, device, _device);
+    VK_FROM_HANDLE(panvk_device_memory, mem, pMemoryUnmapInfo->memory);
+ 
++   if (!mem->addr.host)
++      return VK_SUCCESS;
++
++   if (mem->map_count > 1) {
++      mem->map_count--;
++      return VK_SUCCESS;
++   }
++
+    if (pMemoryUnmapInfo->flags & VK_MEMORY_UNMAP_RESERVE_BIT_EXT) {
+       void *reserved =
+          os_mmap(mem->addr.host, pan_kmod_bo_size(mem->bo), PROT_NONE,
+@@ -415,6 +426,7 @@ panvk_UnmapMemory2KHR(VkDevice _device,
+    }
+ 
+    mem->addr.host = NULL;
++   mem->map_count = 0;
+ 
+    return VK_SUCCESS;
+ }
+diff --git a/src/panfrost/vulkan/panvk_device_memory.h b/src/panfrost/vulkan/panvk_device_memory.h
+index 6fc545b..186f144 100644
+--- a/src/panfrost/vulkan/panvk_device_memory.h
++++ b/src/panfrost/vulkan/panvk_device_memory.h
+@@ -19,6 +19,7 @@ struct panvk_device_memory {
+       uint64_t dev;
+       void *host;
+    } addr;
++   uint32_t map_count;
+ 
+    struct {
+       /* Don't use this pointer, it's only to have user memory dumped when
+-- 
+2.56.1
+

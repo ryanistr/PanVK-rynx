@@ -1,0 +1,63 @@
+From d8b22f7e24d2feebf03f0ef7e3e60cf8a69411da Mon Sep 17 00:00:00 2001
+From: PanVK-rynx <panvk@local>
+Date: Sat, 28 Nov 2026 10:03:14 +0700
+Subject: [PATCH] panvk: enlarge push descriptor storage for combined image
+ samplers
+
+---
+ src/panfrost/vulkan/panvk_cmd_desc_state.h        | 2 +-
+ src/panfrost/vulkan/panvk_cmd_meta.h              | 4 ++--
+ src/panfrost/vulkan/panvk_descriptor_set_layout.h | 2 ++
+ 3 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/src/panfrost/vulkan/panvk_cmd_desc_state.h b/src/panfrost/vulkan/panvk_cmd_desc_state.h
+index 1532f3a..e0b2736 100644
+--- a/src/panfrost/vulkan/panvk_cmd_desc_state.h
++++ b/src/panfrost/vulkan/panvk_cmd_desc_state.h
+@@ -54,7 +54,7 @@ panvk_shader_res_table_count(struct panvk_shader_desc_state *shader_desc_state)
+ struct panvk_push_set {
+    struct panvk_cmd_pool_obj base;
+    struct panvk_descriptor_set set;
+-   struct panvk_opaque_desc descs[MAX_PUSH_DESCS];
++   struct panvk_opaque_desc descs[MAX_PUSH_DESCS_STORAGE];
+ };
+ 
+ struct panvk_descriptor_state {
+diff --git a/src/panfrost/vulkan/panvk_cmd_meta.h b/src/panfrost/vulkan/panvk_cmd_meta.h
+index e468a38..9489301 100644
+--- a/src/panfrost/vulkan/panvk_cmd_meta.h
++++ b/src/panfrost/vulkan/panvk_cmd_meta.h
+@@ -24,7 +24,7 @@ struct panvk_cmd_meta_compute_save_ctx {
+    } cs;
+    const struct panvk_descriptor_set *set0;
+    struct {
+-      struct panvk_opaque_desc desc_storage[MAX_PUSH_DESCS];
++      struct panvk_opaque_desc desc_storage[MAX_PUSH_DESCS_STORAGE];
+       uint64_t descs_dev_addr;
+       uint32_t desc_count;
+       bool dirty;
+@@ -38,7 +38,7 @@ struct panvk_cmd_meta_graphics_save_ctx {
+    const struct panvk_graphics_pipeline *pipeline;
+    const struct panvk_descriptor_set *set0;
+    struct {
+-      struct panvk_opaque_desc desc_storage[MAX_PUSH_DESCS];
++      struct panvk_opaque_desc desc_storage[MAX_PUSH_DESCS_STORAGE];
+       uint64_t descs_dev_addr;
+       uint32_t desc_count;
+       bool dirty;
+diff --git a/src/panfrost/vulkan/panvk_descriptor_set_layout.h b/src/panfrost/vulkan/panvk_descriptor_set_layout.h
+index 35b796f..97a7d81 100644
+--- a/src/panfrost/vulkan/panvk_descriptor_set_layout.h
++++ b/src/panfrost/vulkan/panvk_descriptor_set_layout.h
+@@ -23,6 +23,8 @@
+ #define MAX_DYNAMIC_UNIFORM_BUFFERS   16
+ #define MAX_DYNAMIC_STORAGE_BUFFERS   8
+ #define MAX_PUSH_DESCS                32
++/* Combined image samplers take 2+ hardware descriptors per Vulkan descriptor. */
++#define MAX_PUSH_DESCS_STORAGE        (MAX_PUSH_DESCS * 6)
+ #define MAX_INLINE_UNIFORM_BLOCK_SIZE (1 << 16)
+ #define MAX_DYNAMIC_BUFFERS                                                    \
+    (MAX_DYNAMIC_UNIFORM_BUFFERS + MAX_DYNAMIC_STORAGE_BUFFERS)
+-- 
+2.56.1
+

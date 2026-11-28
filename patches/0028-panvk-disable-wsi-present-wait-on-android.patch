@@ -1,0 +1,41 @@
+From 637fa16a8646590212e31ed1f5850e37d076c7ec Mon Sep 17 00:00:00 2001
+From: PanVK-rynx <panvk@local>
+Date: Sat, 28 Nov 2026 10:03:19 +0700
+Subject: [PATCH] panvk: disable WSI present_wait extensions on Android
+
+---
+ src/panfrost/vulkan/panvk_vX_physical_device.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/panfrost/vulkan/panvk_vX_physical_device.c b/src/panfrost/vulkan/panvk_vX_physical_device.c
+index 0aec8f1..e7229d9 100644
+--- a/src/panfrost/vulkan/panvk_vX_physical_device.c
++++ b/src/panfrost/vulkan/panvk_vX_physical_device.c
+@@ -125,8 +125,10 @@ panvk_per_arch(get_physical_device_extensions)(
+       .KHR_incremental_present = true,
+       .KHR_present_id = true,
+       .KHR_present_id2 = true,
++#ifndef VK_USE_PLATFORM_ANDROID_KHR
+       .KHR_present_wait = true,
+       .KHR_present_wait2 = true,
++#endif
+       .KHR_swapchain = true,
+       .KHR_swapchain_mutable_format = true,
+       .KHR_swapchain_maintenance1 = true,
+@@ -808,11 +810,13 @@ panvk_per_arch(get_physical_device_features)(
+       /* VK_KHR_present_id2 */
+       .presentId2 = true,
+ 
++#ifndef VK_USE_PLATFORM_ANDROID_KHR
+       /* VK_KHR_present_wait */
+       .presentWait = true,
+ 
+       /* VK_KHR_present_wait2 */
+       .presentWait2 = true,
++#endif
+ #endif
+ 
+       /* VK_EXT_device_address_binding_report */
+-- 
+2.56.1
+
